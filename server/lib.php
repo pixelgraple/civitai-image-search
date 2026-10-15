@@ -395,7 +395,55 @@ function thumbnail_path(string $path): string {
     return preg_replace('/\.(png|jpe?g|webp)$/i','-thumb.$1',$path) ?: '';
 }
 
+function gallery_preview_path(string $path): string {
+    return preg_match('/\.(png|jpe?g|webp)$/i',$path) ? $path.'.preview-v1.webp' : '';
+}
+
+/** A separate compact cache keeps original hashes and legacy previews intact. */
+function stored_gallery_preview(string $path): string {
+    $preview=gallery_preview_path($path); $root=realpath((string)(config()['storage_dir']??''));
+    $full=$preview===''?false:realpath($preview);
+    if (!$root || !$full || !str_starts_with($full,$root.DIRECTORY_SEPARATOR) || !is_file($full) || !is_readable($full)) return '';
+    $info=@getimagesize($full);
+    return ($info['mime']??'')==='image/webp' && (int)($info[0]??0)>0 && (int)($info[1]??0)>0 &&
+        (int)$info[0]<=720 && (int)$info[1]<=720 ? $full : '';
+}
+
+/** CLI/worker only: upgrade a bounded legacy thumbnail, never decode an original here. */
+function upgrade_legacy_gallery_preview(string $path,string $mime): bool {
+    if (stored_gallery_preview($path)!=='') return true;
+    if (!function_exists('imagewebp')) return false;
+    $root=realpath((string)(config()['storage_dir']??'')); $legacy=thumbnail_path($path);
+    $source=$legacy===''?false:realpath($legacy); $destination=gallery_preview_path($path);
+    if (!$root || !$source || $destination==='' || !str_starts_with($source,$root.DIRECTORY_SEPARATOR) ||
+        realpath(dirname($destination))!==dirname($source) || !is_file($source) || !is_readable($source) || filesize($source)>8*1024*1024) return false;
+    $info=@getimagesize($source); $width=(int)($info[0]??0); $height=(int)($info[1]??0);
+    if (($info['mime']??'')!==$mime || $width<1 || $height<1 || max($width,$height)>4096 || $width*(float)$height>2500000) return false;
+    $decoder=['image/jpeg'=>'imagecreatefromjpeg','image/png'=>'imagecreatefrompng','image/webp'=>'imagecreatefromwebp'][$mime]??'';
+    if ($decoder==='' || !function_exists($decoder)) return false;
+    $limit=trim((string)ini_get('memory_limit')); $memoryLimit=(float)$limit;
+    if (preg_match('/([kmg])$/i',$limit,$match)) $memoryLimit*=1024**(['k'=>1,'m'=>2,'g'=>3][strtolower($match[1])]);
+    $estimated=$width*(float)$height*8+720*720*8+16*1024*1024;
+    if ($memoryLimit>0 && memory_get_usage(true)+$estimated>$memoryLimit) return false;
+    $image=null; $out=null; $temporary=$destination.'.'.bin2hex(random_bytes(5)).'.tmp';
+    try {
+        $image=@$decoder($source); if (!$image) return false;
+        $scale=min(1,720/max($width,$height));
+        $out=imagecreatetruecolor(max(1,(int)round($width*$scale)),max(1,(int)round($height*$scale)));
+        if (!$out) return false;
+        imagealphablending($out,false); imagesavealpha($out,true);
+        if (!imagecopyresampled($out,$image,0,0,0,0,imagesx($out),imagesy($out),$width,$height) || !imagewebp($out,$temporary,80)) return false;
+        $saved=@getimagesize($temporary);
+        if (($saved['mime']??'')!=='image/webp' || (int)($saved[0]??0)<1 || (int)($saved[1]??0)<1) return false;
+        return chmod($temporary,0640) && rename($temporary,$destination);
+    } finally {
+        if ($out) imagedestroy($out); if ($image) imagedestroy($image);
+        if (is_file($temporary)) @unlink($temporary);
+    }
+}
+
 function valid_stored_thumbnail(string $path, string $mime): bool {
+    if (stored_gallery_preview($path)!=='') return true;
     $thumb=thumbnail_path($path); $root=realpath((string)(config()['storage_dir']??'')); $full=$thumb===''?false:realpath($thumb);
     if (!$root || !$full || !str_starts_with($full,$root.DIRECTORY_SEPARATOR) || !is_file($full) || !is_readable($full)) return false;
     $info=@getimagesize($full); return ($info['mime']??'')===$mime;
@@ -529,7 +577,7 @@ function public_image_row(array $row): array {
         'id'=>$id, 'pageUrl'=>$capturedPageUrl ?: 'https://civitai.red/images/' . rawurlencode($id),
         'capturedPageUrl'=>$capturedPageUrl, 'sourceDomain'=>$sourceDomain,
         'sourceOrigin'=>$sourceDomain!=='' ? 'https://'.$sourceDomain : '',
-        'previewUrl'=>($row['download_status'] === 'ready') ? 'media.php?id=' . rawurlencode($id) . '&variant=thumb' : '',
+        'previewUrl'=>($row['download_status'] === 'ready') ? 'media.php?id=' . rawurlencode($id) . '&variant=thumb&pv=1' : '',
         'downloadUrl'=>($row['download_status'] === 'ready') ? 'media.php?id=' . rawurlencode($id) : '',
         'prompt'=>$row['prompt'], 'negativePrompt'=>$row['negative_prompt'],
         'tags'=>json_decode($row['tags_json'], true) ?: [], 'modelName'=>$row['model_name'], 'creatorName'=>(string)($row['creator_name']??''),

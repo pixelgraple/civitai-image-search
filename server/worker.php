@@ -266,17 +266,18 @@ function fetch_image_pipeline(callable $nextJob,callable $complete,callable $rea
 }
 
 /** Isolate oversized decoding in a tightly bounded ImageMagick subprocess. */
-function worker_large_thumbnail(string $source,string $destination,string $mime): bool {
+function worker_large_thumbnail(string $source,string $destination,string $mime,?string $outputMime=null): bool {
     if (!function_exists('proc_open') || !is_executable('/usr/bin/convert') || !is_executable('/usr/bin/prlimit')) return false;
     $format=['image/jpeg'=>'jpeg','image/png'=>'png','image/webp'=>'webp'][$mime]??'';
-    if ($format==='') return false;
+    $outputMime??=$mime; $outputFormat=['image/jpeg'=>'jpeg','image/png'=>'png','image/webp'=>'webp'][$outputMime]??'';
+    if ($format==='' || $outputFormat==='') return false;
     $temporary=$destination.'.magick';
     if (!mkdir($temporary,0750)) return false;
     // ImageMagick's cache limits do not bound codec allocations. An OS address
     // space limit also contains libwebp/libpng decoder memory in the child.
     $command=['/usr/bin/prlimit','--as=671088640','--cpu=12','--','/usr/bin/convert','-limit','thread','1','-limit','memory','64MiB','-limit','map','64MiB',
         '-limit','disk','1024MiB','-limit','time','12','-limit','area','16MP',
-        $format.':'.$source.'[0]','-thumbnail','720x720>','-strip','-quality','82',$format.':'.$destination];
+        $format.':'.$source.'[0]','-thumbnail','720x720>','-strip','-quality','80',$outputFormat.':'.$destination];
     $process=null; $pipes=[]; $code=-1; $until=microtime(true)+13;
     try {
         $process=proc_open($command,[0=>['file','/dev/null','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes,null,
@@ -297,7 +298,7 @@ function worker_large_thumbnail(string $source,string $destination,string $mime)
         $closed=proc_close($process); $process=null; if ($code<0) $code=$closed;
         if ($code!==0 || !is_file($destination)) return false;
         $info=@getimagesize($destination);
-        return ($info['mime']??'')===$mime && (int)($info[0]??0)>0 && (int)($info[1]??0)>0 && (int)$info[0]<=720 && (int)$info[1]<=720;
+        return ($info['mime']??'')===$outputMime && (int)($info[0]??0)>0 && (int)($info[1]??0)>0 && (int)$info[0]<=720 && (int)$info[1]<=720;
     } finally {
         if (is_resource($process)) { proc_terminate($process,9); foreach ($pipes as $pipe) if (is_resource($pipe)) fclose($pipe); proc_close($process); }
         foreach (glob($temporary.'/*') ?: [] as $file) if (is_file($file)) @unlink($file);
@@ -305,12 +306,13 @@ function worker_large_thumbnail(string $source,string $destination,string $mime)
     }
 }
 
-function save_thumbnail(string $source,string $destination,string $mime): void {
+function save_thumbnail(string $source,string $destination,string $mime,?string $outputMime=null): void {
+    $outputMime??=$mime;
     // Read only image headers before GD allocates decoded pixels. Small compressed
     // PNGs can expand far beyond the worker's cgroup memory budget.
     $info=@getimagesize($source); $width=(int)($info[0]??0); $height=(int)($info[1]??0);
     if ($width<=0 || $height<=0 || ($info['mime']??'')!==$mime) throw new RuntimeException('Invalid original dimensions for thumbnail.');
-    $scale=min(1,720/max(1,$width)); $outWidth=max(1,(int)round($width*$scale)); $outHeight=max(1,(int)round($height*$scale));
+    $scale=min(1,720/max($width,$height)); $outWidth=max(1,(int)round($width*$scale)); $outHeight=max(1,(int)round($height*$scale));
     $limit=trim((string)ini_get('memory_limit')); $memoryLimit=(float)$limit;
     if (preg_match('/([kmg])$/i',$limit,$match)) $memoryLimit*=1024**(['k'=>1,'m'=>2,'g'=>3][strtolower($match[1])]);
     $available=$memoryLimit>0 ? max(0,$memoryLimit-memory_get_usage(true)-32*1024*1024) : 128*1024*1024;
@@ -318,32 +320,65 @@ function save_thumbnail(string $source,string $destination,string $mime): void {
     $estimated=$width*(float)$height*8+$outWidth*(float)$outHeight*8+16*1024*1024;
     $decoder=['image/jpeg'=>'imagecreatefromjpeg','image/png'=>'imagecreatefrompng','image/webp'=>'imagecreatefromwebp'][$mime]??'';
     if ($width>32768 || $height>32768 || $estimated>$budget || !$decoder || !function_exists($decoder)) {
-        if (worker_large_thumbnail($source,$destination,$mime)) {
+        if (worker_large_thumbnail($source,$destination,$mime,$outputMime)) {
             fwrite(STDOUT,'thumbnail bounded conversion '.basename($source).' '.$width.'x'.$height."\n"); return;
         }
+        if ($outputMime!==$mime) throw new RuntimeException('Compact preview conversion unavailable.');
         // The validated original remains viewable even when thumbnail decoding
         // would exceed safe memory. copy() streams bytes and does not decode.
         if (!copy($source,$destination)) throw new RuntimeException('Could not copy bounded-memory thumbnail fallback.');
         fwrite(STDOUT,'thumbnail original fallback '.basename($source).' '.$width.'x'.$height."; GD memory limit protected\n"); return;
     }
     $image=@$decoder($source);
-    if (!$image) { if (!copy($source,$destination)) throw new RuntimeException('Could not copy thumbnail.'); return; }
+    if (!$image) {
+        if ($outputMime!==$mime) throw new RuntimeException('Compact preview decoding unavailable.');
+        if (!copy($source,$destination)) throw new RuntimeException('Could not copy thumbnail.'); return;
+    }
     $out=imagecreatetruecolor($outWidth,$outHeight);
     if (!$out) { imagedestroy($image); throw new RuntimeException('Could not allocate bounded thumbnail.'); }
     if ($mime==='image/png' || $mime==='image/webp') { imagealphablending($out,false); imagesavealpha($out,true); }
     imagecopyresampled($out,$image,0,0,0,0,imagesx($out),imagesy($out),$width,$height);
-    if ($mime==='image/jpeg') $ok=imagejpeg($out,$destination,84); elseif ($mime==='image/png') $ok=imagepng($out,$destination,7); else $ok=imagewebp($out,$destination,82);
+    if ($outputMime==='image/jpeg') $ok=imagejpeg($out,$destination,84); elseif ($outputMime==='image/png') $ok=imagepng($out,$destination,7); else $ok=imagewebp($out,$destination,80);
     imagedestroy($out); imagedestroy($image);
     if (!$ok) throw new RuntimeException('Could not encode thumbnail.');
 }
 
 function ensure_thumbnail(string $source,string $mime): void {
+    if (stored_gallery_preview($source)!=='') return;
+    $compactFailed=false;
+    if (function_exists('imagewebp')) {
+        // Existing previews remain valid while the background backfill upgrades
+        // them. New originals are decoded once straight into the compact cache.
+        if (valid_stored_thumbnail($source,$mime)) {
+            try { upgrade_legacy_gallery_preview($source,$mime); }
+            catch (Throwable $error) { fwrite(STDERR,'legacy preview retained '.basename($source).': '.$error->getMessage()."\n"); }
+            return;
+        }
+        $destination=gallery_preview_path($source);
+        if ($destination==='') throw new RuntimeException('Invalid compact preview path.');
+        $temporary=$destination.'.'.bin2hex(random_bytes(5)).'.tmp';
+        try {
+            save_thumbnail($source,$temporary,$mime,'image/webp');
+            $info=@getimagesize($temporary);
+            if (($info['mime']??'')!=='image/webp' || (int)($info[0]??0)<1 || (int)($info[1]??0)<1 || max((int)$info[0],(int)$info[1])>720) throw new RuntimeException('Invalid compact preview.');
+            if (!chmod($temporary,0640) || !rename($temporary,$destination)) throw new RuntimeException('Could not finalize compact preview.');
+            return;
+        } catch (Throwable $error) {
+            $compactFailed=true;
+            fwrite(STDERR,'compact preview fallback '.basename($source).': '.$error->getMessage()."\n");
+        } finally { if (is_file($temporary)) @unlink($temporary); }
+    }
     if (valid_stored_thumbnail($source,$mime)) return;
     $destination=thumbnail_path($source);
     if ($destination==='') throw new RuntimeException('Invalid thumbnail path.');
     $temporary=$destination.'.'.bin2hex(random_bytes(5)).'.tmp';
     try {
-        save_thumbnail($source,$temporary,$mime); chmod($temporary,0640);
+        // Do not repeat a timed-out decoder: retain the established streaming
+        // fallback within the worker's existing per-thumbnail time budget.
+        if ($compactFailed) {
+            if (!copy($source,$temporary)) throw new RuntimeException('Could not retain thumbnail fallback.');
+        } else save_thumbnail($source,$temporary,$mime);
+        chmod($temporary,0640);
         if (!rename($temporary,$destination)) throw new RuntimeException('Could not finalize thumbnail.');
     } finally { if (is_file($temporary)) @unlink($temporary); }
 }

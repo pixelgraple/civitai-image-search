@@ -139,6 +139,15 @@ try {
             $where[] = 'i.image_id IN (SELECT image_id FROM images_fts WHERE images_fts MATCH ?)'; $args[]=$fts;
         }
         if ($tags) {
+            // Narrow candidates through the existing tag index before checking
+            // exact tag values. Keep JSON equality so punctuation and full tag
+            // boundaries retain their meaning. Non-ASCII/punctuation-only tags
+            // use the original predicate rather than risk tokenizer differences.
+            $indexedTags=array_values(array_filter($tags,static fn($name)=>preg_match('/^[\x20-\x7E]+$/D',$name) && preg_match('/[a-z0-9]/i',$name)));
+            if ($indexedTags && ($tagMode==='all' || count($indexedTags)===count($tags))) {
+                $tagFts='tags : ('.implode($tagMode==='any' ? ' OR ' : ' AND ',array_map(static fn($name)=>'"'.str_replace('"','""',$name).'"',$indexedTags)).')';
+                $where[]='i.image_id IN (SELECT image_id FROM images_fts WHERE images_fts MATCH ?)'; $args[]=$tagFts;
+            }
             $tagClauses=[];
             foreach ($tags as $name) { $tagClauses[]='EXISTS (SELECT 1 FROM json_each(i.tags_json) jt WHERE catalog_lower(CAST(jt.value AS TEXT))=?)'; $args[]=$name; }
             $where[]='('.implode($tagMode==='any' ? ' OR ' : ' AND ',$tagClauses).')';
@@ -150,12 +159,13 @@ try {
         $baseWhere=$where; $baseArgs=$args;
         if ($category !== '') { $where[] = 'i.style_category=?'; $args[] = $category; }
         $clause = $where ? ' WHERE ' . implode(' AND ', $where) : '';
-        $pdo = db();
+        $searchStarted=microtime(true); $pdo = db(); $databaseReady=microtime(true);
         // Apply name/tag predicates once for all category counts, including the total.
         $counts=['anime'=>0,'realistic'=>0,'uncertain'=>0];
         $countStmt=$pdo->prepare('SELECT i.style_category,COUNT(*) total FROM images i WHERE '.implode(' AND ',$baseWhere).' GROUP BY i.style_category');
         $countStmt->execute($baseArgs);
         foreach ($countStmt->fetchAll() as $countRow) $counts[(string)$countRow['style_category']]=(int)$countRow['total'];
+        $countFinished=microtime(true);
         $total=$category!=='' ? $counts[$category] : array_sum($counts);
         $offset = ($page-1)*$limit;
         $order = match($sort) {
@@ -167,6 +177,7 @@ try {
         foreach ($args as $index=>$value) $stmt->bindValue($index+1,$value,PDO::PARAM_STR);
         $stmt->bindValue(count($args)+1,$limit,PDO::PARAM_INT); $stmt->bindValue(count($args)+2,$offset,PDO::PARAM_INT); $stmt->execute();
         $items = array_map('public_image_row',$stmt->fetchAll());
+        header(sprintf('Server-Timing: database;dur=%.1f, search_count;dur=%.1f, search_page;dur=%.1f',1000*($databaseReady-$searchStarted),1000*($countFinished-$databaseReady),1000*(microtime(true)-$countFinished)));
         json_response(['ok'=>true,'items'=>$items,'total'=>$total,'page'=>$page,'limit'=>$limit,'pages'=>(int)ceil($total/$limit),'categoryCounts'=>$counts,'sort'=>$sort,'qMode'=>$qMode,'tagMode'=>$tagMode,'creatorMatch'=>$creatorMatch]);
     }
     if ($action === 'images' && $_SERVER['REQUEST_METHOD'] === 'POST') {
