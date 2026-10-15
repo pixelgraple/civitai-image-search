@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS images (
   negative_prompt TEXT NOT NULL DEFAULT '',
   tags_json TEXT NOT NULL DEFAULT '[]',
   model_name TEXT NOT NULL DEFAULT '',
+  creator_name TEXT NOT NULL DEFAULT '',
   loras_json TEXT NOT NULL DEFAULT '[]',
   reactions_json TEXT NOT NULL DEFAULT '{}',
   image_width INTEGER NOT NULL DEFAULT 0,

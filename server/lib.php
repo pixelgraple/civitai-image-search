@@ -24,7 +24,7 @@ function db(): PDO {
     if ($schema===false) throw new RuntimeException('Database schema is unavailable.');
     $pdo->exec($schema);
     $columns=array_column($pdo->query('PRAGMA table_info(images)')->fetchAll(),'name');
-    foreach (['reactions_json'=>"TEXT NOT NULL DEFAULT '{}'",'image_width'=>'INTEGER NOT NULL DEFAULT 0','image_height'=>'INTEGER NOT NULL DEFAULT 0'] as $column=>$definition) {
+    foreach (['reactions_json'=>"TEXT NOT NULL DEFAULT '{}'",'image_width'=>'INTEGER NOT NULL DEFAULT 0','image_height'=>'INTEGER NOT NULL DEFAULT 0','creator_name'=>"TEXT NOT NULL DEFAULT ''"] as $column=>$definition) {
         if (in_array($column,$columns,true)) continue;
         try { $pdo->exec('ALTER TABLE images ADD COLUMN '.$column.' '.$definition); }
         catch (PDOException $error) {
@@ -32,11 +32,17 @@ function db(): PDO {
             if (!in_array($column,$current,true)) throw $error;
         }
     }
+    // Build after additive column migrations so older catalogs also upgrade safely.
+    // SQLite sorts NULL scores last in DESC order; incomplete source counts stay unknown.
+    $pdo->exec('CREATE INDEX IF NOT EXISTS images_civitai_reaction_order ON images('.source_reaction_score_sql().' DESC,length(image_id) DESC,image_id DESC)');
+    // Cover grouped counts and name/tag predicates without reading prompt/media columns.
+    $pdo->exec('CREATE INDEX IF NOT EXISTS images_search_facets ON images(style_category,creator_name,loras_json,tags_json,image_id)');
     return $pdo;
 }
 
 function lower_text(string $value): string { return function_exists('mb_strtolower') ? mb_strtolower($value,'UTF-8') : strtolower($value); }
 function cut_text(string $value,int $length): string { return function_exists('mb_substr') ? mb_substr($value,0,$length,'UTF-8') : substr($value,0,$length); }
+function text_length(string $value): int { return function_exists('mb_strlen') ? mb_strlen($value,'UTF-8') : (int)preg_match_all('/./us',$value); }
 
 function json_response(array $body, int $status = 200): never {
     http_response_code($status);
@@ -91,29 +97,61 @@ function source_reactions_missing(mixed $value): bool {
     return count(array_diff(['likeCount','heartCount','laughCount','cryCount'],array_keys($known)))>0;
 }
 
-/** Refresh source metadata without inspecting media or rewriting searchable image fields. */
+/** Keep the indexed ordering identical to source_reactions_missing(), excluding Buzz. */
+function source_reaction_score_sql(string $alias=''): string {
+    $column=($alias!=='' ? $alias.'.' : '').'reactions_json';
+    $checks=[]; $values=[];
+    foreach (['likeCount','heartCount','laughCount','cryCount'] as $key) {
+        $value="json_extract($column,'$.".$key."')";
+        $checks[]="json_type($column,'$.".$key."') IN ('integer','real') AND $value>=0 AND $value<=9007199254740991 AND CAST($value AS INTEGER)=$value";
+        $values[]=$value;
+    }
+    return 'CASE WHEN json_valid('.$column.') THEN CASE WHEN '.implode(' AND ',$checks).' THEN '.implode('+',$values).' ELSE NULL END ELSE NULL END';
+}
+
+function normalize_creator_name(mixed $value): string {
+    if (!is_string($value) || !preg_match('//u',$value) || preg_match('/[\x00-\x1F\x7F]/u',$value)) return '';
+    return cut_text(ltrim(trim($value),'@'),200);
+}
+
+/** Query values must be strings, bounded, and valid UTF-8 before any SQL construction. */
+function search_parameter(string $key,string $default='',int $maxLength=300): string {
+    $value=$_GET[$key]??$default;
+    if (!is_string($value) || strlen($value)>4*$maxLength || !preg_match('//u',$value) || str_contains($value,"\0") || text_length($value)>$maxLength) {
+        json_response(['ok'=>false,'error'=>'Invalid or oversized search parameter: '.$key.'.'],400);
+    }
+    return trim($value);
+}
+
+/** Refresh source reactions and creator attribution without inspecting media or prompt fields. */
 function update_source_reactions(PDO $pdo,array $items): array {
     $records=[]; $skipped=0;
     foreach ($items as $item) {
-        if (!is_array($item) || !valid_image_id($item['id']??null) || !($counts=normalize_reactions($item['reactions']??null))) {
+        if (!is_array($item) || !valid_image_id($item['id']??null)) {
             $skipped++; continue;
         }
+        $counts=normalize_reactions($item['reactions']??null); $creator=normalize_creator_name($item['creatorName']??null);
+        if (!$counts && $creator==='') { $skipped++; continue; }
         $id=(string)$item['id'];
-        $records[$id]=array_replace($records[$id]??[],$counts);
+        $records[$id]=[
+            'reactions'=>array_replace($records[$id]['reactions']??[],$counts),
+            'creatorName'=>$creator!=='' ? $creator : ($records[$id]['creatorName']??''),
+        ];
     }
     $accepted=0; $updated=0; $missingIds=[];
     if (!$records) return compact('accepted','updated','skipped','missingIds');
-    $find=$pdo->prepare('SELECT reactions_json FROM images WHERE image_id=?');
-    $update=$pdo->prepare('UPDATE images SET reactions_json=?,updated_at=? WHERE image_id=?');
+    $find=$pdo->prepare('SELECT reactions_json,creator_name FROM images WHERE image_id=?');
+    $update=$pdo->prepare('UPDATE images SET reactions_json=?,creator_name=?,updated_at=? WHERE image_id=?');
     $pdo->beginTransaction();
     try {
-        foreach ($records as $id=>$counts) {
+        foreach ($records as $id=>$record) {
             $id=(string)$id; $find->execute([$id]); $row=$find->fetch();
             if (!$row) { $missingIds[]=$id; continue; }
             $prior=normalize_reactions(json_decode($row['reactions_json'],true));
-            $merged=array_replace($prior,$counts); $accepted++;
-            if ($merged==$prior) continue;
-            $update->execute([json_encode((object)$merged,JSON_THROW_ON_ERROR),gmdate('c'),$id]); $updated++;
+            $merged=array_replace($prior,$record['reactions']);
+            $creator=$record['creatorName']!=='' ? $record['creatorName'] : (string)$row['creator_name']; $accepted++;
+            if ($merged==$prior && $creator===(string)$row['creator_name']) continue;
+            $update->execute([json_encode((object)$merged,JSON_THROW_ON_ERROR),$creator,gmdate('c'),$id]); $updated++;
         }
         $pdo->commit();
     } catch (Throwable $error) {
@@ -470,14 +508,17 @@ function authenticate_writer(): void {
 
 function public_image_row(array $row): array {
     $id = (string)$row['image_id'];
+    $sourceReactions=normalize_reactions(json_decode($row['reactions_json'],true));
+    $sourceTotal=source_reactions_missing($sourceReactions) ? null : array_sum(array_intersect_key($sourceReactions,array_flip(['likeCount','heartCount','laughCount','cryCount'])));
     return [
         'id'=>$id, 'pageUrl'=>'https://civitai.red/images/' . rawurlencode($id),
         'previewUrl'=>($row['download_status'] === 'ready') ? 'media.php?id=' . rawurlencode($id) . '&variant=thumb' : '',
         'downloadUrl'=>($row['download_status'] === 'ready') ? 'media.php?id=' . rawurlencode($id) : '',
         'prompt'=>$row['prompt'], 'negativePrompt'=>$row['negative_prompt'],
-        'tags'=>json_decode($row['tags_json'], true) ?: [], 'modelName'=>$row['model_name'],
+        'tags'=>json_decode($row['tags_json'], true) ?: [], 'modelName'=>$row['model_name'], 'creatorName'=>(string)($row['creator_name']??''),
         'loras'=>json_decode($row['loras_json'], true) ?: [], 'category'=>$row['style_category'],
         'reactions'=>json_decode($row['reactions_json'],true) ?: new stdClass(),
+        'sourceReactionTotal'=>$sourceTotal,
         'communityReactions'=>[
             'upvote'=>(int)($row['community_upvote']??0),'heart'=>(int)($row['community_heart']??0),
             'laugh'=>(int)($row['community_laugh']??0),'wow'=>(int)($row['community_wow']??0),

@@ -2,6 +2,15 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.12
+
+- Add Most Civitai reactions sorting, separate from community upvotes and Buzz.
+- Add dedicated LoRA and creator name filters with clickable names in the full viewer.
+- Add AND/OR controls for search words and multiple exact source tags.
+- Capture creator usernames from image-specific metadata and enrich existing records on ordinary revisits without another image download.
+- Retain LoRA model and version names when available.
+- Add indexed reaction ordering and compact search metadata indexes; preserve the collection and transfer limits.
+
 ## 2.8.11
 
 - Add a live 4–32 server image-transfer slider per Civitai tab, defaulting to 32.

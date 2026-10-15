@@ -5,7 +5,7 @@ importScripts('collection-speed.js', 'download-settings.js', 'catalog-check-queu
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.11', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.12', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -42,7 +42,7 @@ const sourceReactionUpdates = ISSSourceReactions.create({
   cooldownUntil: () => uploadCooldownUntil, changed: notifyStatusChanged,
   error: error => addDebug('source-reactions', String(error?.message || error))
 });
-const observeSourceReactions = (id, reactions) => sourceReactionUpdates.observe(id, reactions).catch(error => addDebug('source-reactions', error.message));
+const observeSourceReactions = (id, reactions, creatorName = '') => sourceReactionUpdates.observe(id, reactions, { creatorName }).catch(error => addDebug('source-reactions', error.message));
 const reactionPages = ISSReactionPages.create({
   load: () => readStorage('civitaiReactionPagesV1'), save: value => writeStorage('civitaiReactionPagesV1', value),
   observe: (id, reactions) => sourceReactionUpdates.observe(id, reactions, { retainMissing: true }), changed: notifyStatusChanged,
@@ -58,7 +58,8 @@ const reactionPages = ISSReactionPages.create({
     if (!tab) throw Object.assign(new Error('Reaction enrichment is waiting for an available Civitai tab.'), { status: 409 });
     const current = async () => eligible(await getTab(tab.id)) && ((await readCloudCatalogConfig()).autoBrowse || activeRuns().length > 0);
     return ISSFeed.civitaiPageReactions({ pageUrl: item.pageUrl }, item.id,
-      url => requestCivitaiFeed(tab.id, url, tab.url, current));
+      url => requestCivitaiFeed(tab.id, url, tab.url, current),
+      creatorName => sourceReactionUpdates.observe(item.id, {}, { creatorName, retainMissing: true }));
   }
 });
 const deferReactionPage = (id, tabId, pageUrl) => reactionPages.enqueue({ id: String(id), tabId, pageUrl });
@@ -475,14 +476,14 @@ async function backgroundFeedPulse(tabId) {
         }
         if (progress.phase === 'metadata-admit') {
           const id = String(progress.id);
-          if (run.catalogSyncedIds.includes(id)) { observeSourceReactions(id, progress.reactions); return { skip: true }; }
+          if (run.catalogSyncedIds.includes(id)) { observeSourceReactions(id, progress.reactions, progress.creatorName); return { skip: true }; }
           if (run.catalogPromptlessSkippedIds.includes(id) || run.catalogOversizeSkippedIds.includes(id)) return { skip: true };
           await admitManualImage(id, run, current);
           markOutstanding(id, 'manual', tabId, 'waitingDuplicateCheck');
           const stored = await checkQueuedCatalogImage(id, current);
           if (!current()) throw Object.assign(new Error('Collection was paused.'), { status: 409 });
           if (stored.exists) {
-            if (stored.downloadStatus !== 'skipped') observeSourceReactions(id, progress.reactions);
+            if (stored.downloadStatus !== 'skipped') observeSourceReactions(id, progress.reactions, progress.creatorName);
             run.catalogIds = [...new Set([...run.catalogIds, id])];
             run.catalogProcessedIds = [...new Set([...run.catalogProcessedIds, id])];
             await acceptManualRecords(run, [{ id }], [stored]);
@@ -604,7 +605,7 @@ async function syncCloudCatalogItems(records, { required = true, onAccepted, tab
     const id = String(record?.id ?? '');
     if (!/^\d{1,20}$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0) throw new Error('Shared catalog record has an invalid image ID.');
     const prior = uniqueRecords.get(id) || {}, merged = { ...prior, ...record, id };
-    for (const key of ['prompt', 'negativePrompt', 'modelName', 'downloadUrl', 'sourceUrl']) if (!String(merged[key] || '').trim() && prior[key]) merged[key] = prior[key];
+    for (const key of ['prompt', 'negativePrompt', 'modelName', 'creatorName', 'downloadUrl', 'sourceUrl']) if (!String(merged[key] || '').trim() && prior[key]) merged[key] = prior[key];
     for (const key of ['tags', 'loras']) if ((!Array.isArray(merged[key]) || !merged[key].length) && prior[key]) merged[key] = prior[key];
     merged.reactions = { ...(prior.reactions || {}), ...(record.reactions || {}) }; uniqueRecords.set(id, merged);
   }
@@ -613,7 +614,8 @@ async function syncCloudCatalogItems(records, { required = true, onAccepted, tab
     let entry = preparedUploads.get(record.id);
     const fresh = !entry;
     if (!entry) { entry = { record, subscribers: new Set(), uploading: false, checking: true }; preparedUploads.set(record.id, entry); }
-    else if (!entry.uploading && !entry.selected) entry.record = { ...entry.record, ...record };
+    else if (!entry.uploading && !entry.selected) entry.record = { ...entry.record, ...record,
+      creatorName: record.creatorName || entry.record.creatorName || '' };
     entry.subscribers.add({ tabId, isCurrent, onAccepted, resolve, reject });
     if (fresh) checkPreparedUpload(entry);
     else if (!entry.checking) scheduleUploadFlush();
@@ -645,7 +647,7 @@ async function checkPreparedUpload(entry) {
     if (!await liveSubscribers(entry)) return;
     entry.storageItem = stored;
     if (stored.exists) {
-      if (stored.downloadStatus !== 'skipped') observeSourceReactions(entry.record.id, entry.record.reactions);
+      if (stored.downloadStatus !== 'skipped') observeSourceReactions(entry.record.id, entry.record.reactions, entry.record.creatorName);
       await completePreparedUpload(entry, stored);
     }
   } catch (error) {

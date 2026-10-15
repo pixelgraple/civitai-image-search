@@ -4,7 +4,7 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.11](https://search-civitai.xyz/downloads/index-civitai-2.8.11.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.11)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.12](https://search-civitai.xyz/downloads/index-civitai-2.8.12.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.12)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Public browsing and contribution require no account or contributor key.
 
@@ -30,7 +30,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.11.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.12.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.
@@ -63,7 +63,7 @@ Background tabs do not need to be focused, but they must remain open and availab
 - Known oversized images are skipped before submission or download. The server also checks actual image headers and stops oversized transfers when dimensions become available.
 - Skipped oversized IDs are remembered to avoid repeated work. Previously completed image copies are retained.
 
-Where available, the catalog stores the original image link, positive and negative prompts, tags, model and LoRA names, source reactions, dimensions, file hash and storage status. An incomplete rescan does not erase a previously known positive prompt.
+Where available, the catalog stores the original image link, positive and negative prompts, tags, model and LoRA names, captured creator usernames, source reactions, dimensions, file hash and storage status. An incomplete rescan does not erase a previously known positive prompt.
 
 ## How collection and storage work
 
@@ -113,6 +113,13 @@ The extension reads Civitai pages and the feed/detail requests used by those pag
 Open [the library](https://search-civitai.xyz/), search a word such as `selfie`, `landscape` or `portrait`, and refine by tag or style. Results include matching counts and pagination. Click a card for the full image, readable prompt, tags, generation resources and source link. Copy a prompt or move to the next image directly from the viewer.
 
 The layout prioritizes desktop use, with a central image and a right-hand details panel. Mobile layouts are also supported.
+
+Use **All words (AND)** or **Any word (OR)** beside the main search. In **Filters**, enter up to 20 comma-separated exact source tags and choose **All tags (AND)** or **Any tag (OR)**. For example, `selfie, beach` with AND requires both tags; OR accepts either. Separate filled filters always narrow one another.
+
+Dedicated **LoRA name** and **Creator username** fields match full names or name fragments, ignoring case. Creator means the image uploader; a leading `@` is optional. Click a captured creator or LoRA in the full image viewer to search that name. Names must have been captured from the source. Version 2.8.12 begins collecting creator attribution during ordinary scans and revisits; older records remain unattributed until encountered again. Missing names are never inferred from prompt text.
+
+Choose **Most Civitai reactions** to rank captured likes, hearts, laughs and cries combined. Records with incomplete counts appear last. Buzz currency and this library's community votes are excluded. **Community upvotes** remains a separate sort.
+
 
 ### Anime and Realistic are metadata groups
 

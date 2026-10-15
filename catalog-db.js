@@ -4,7 +4,7 @@ globalThis.PromptCatalogDB = (() => {
   const DB_VERSION = 1;
   function mergeRecords(prior,record) {
     const merged={...prior,...record};
-    for (const field of ['prompt','negativePrompt','modelName','downloadUrl','previewUrl','pageUrl']) {
+    for (const field of ['prompt','negativePrompt','modelName','creatorName','downloadUrl','previewUrl','pageUrl']) {
       if (!String(record[field] ?? '').trim() && prior[field]) merged[field]=prior[field];
     }
     for (const field of ['tags','loras']) {

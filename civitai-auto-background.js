@@ -7,6 +7,11 @@ globalThis.ISSBrowseCollector = (() => {
   const LEGACY_CANCELLED_MESSAGE = 'This image collection was stopped before it started.';
   const reactions = value => Object.fromEntries(['likeCount', 'heartCount', 'laughCount', 'cryCount', 'buzzCount']
     .filter(key => value?.statsUnknown !== true && Number.isSafeInteger(value?.[key]) && value[key] >= 0).map(key => [key, value[key]]));
+  const creatorName = value => {
+    if (typeof value !== 'string') return '';
+    const name = value.trim().replace(/^@/, '');
+    return name && [...name].length <= 200 && !/[\u0000-\u001f\u007f-\u009f]/u.test(name) ? name : '';
+  };
   function page(value) {
     try { const url = new URL(value); return url.protocol === 'https:' &&
       ['civitai.com', 'civitai.red'].includes(url.hostname) && !url.username && !url.password ? url : null; }
@@ -19,7 +24,7 @@ globalThis.ISSBrowseCollector = (() => {
       const preview = new URL(value.previewUrl);
       if (preview.protocol !== 'https:' || !['image.civitai.com', 'imagecache.civitai.com'].includes(preview.hostname) ||
           preview.username || preview.password || !/\.(?:png|jpe?g|webp)$/i.test(preview.pathname)) return null;
-      return { id, previewUrl: preview.href, reactions: reactions(value.reactions),
+      return { id, previewUrl: preview.href, reactions: reactions(value.reactions), creatorName: creatorName(value.creatorName),
         ...(Number.isSafeInteger(value.width) && value.width > 0 ? { width: value.width } : {}),
         ...(Number.isSafeInteger(value.height) && value.height > 0 ? { height: value.height } : {}) };
     } catch { return null; }
@@ -143,15 +148,19 @@ globalThis.ISSBrowseCollector = (() => {
       pruneSeen(); const accepted = [], newlyQueued = [];
       for (const value of (Array.isArray(message.cards) ? message.cards : []).slice(0, speed().discoveryBatchSize)) {
         const item = card(value); if (!item) continue;
-        if (Object.keys(item.reactions).length) {
+        if (Object.keys(item.reactions).length || item.creatorName) {
           // Already stored/seen images still contribute newly observed counts.
           // This shared metadata queue never requests an image download.
           const queued = saved.pending.find(entry => entry.card.id === item.id);
           if (message.reactionsOnly === true || saved.seen.some(entry => entry.id === item.id) || (queued && submitting.has(queued)))
-            await deps.observeReactions?.(item.id, item.reactions);
+            await deps.observeReactions?.(item.id, item.reactions, item.creatorName);
           if (queued) {
             queued.card.reactions = { ...(queued.card.reactions || {}), ...item.reactions };
             if (queued.record) queued.record.reactions = { ...(queued.record.reactions || {}), ...item.reactions };
+            if (item.creatorName) {
+              queued.card.creatorName = item.creatorName;
+              if (queued.record) queued.record.creatorName = item.creatorName;
+            }
           }
         }
         if (message.reactionsOnly === true) { accepted.push(item.id); continue; }
@@ -252,7 +261,7 @@ globalThis.ISSBrowseCollector = (() => {
           if (result.downloadStatus === 'skipped' && result.skipReason === 'oversize') {
             await skipOversize(entry); return result;
           }
-          await deps.observeReactions?.(entry.card.id, entry.card.reactions);
+          await deps.observeReactions?.(entry.card.id, entry.card.reactions, entry.card.creatorName);
           // A verified original can still be pending its thumbnail repair. Its
           // source metadata and original transfer do not need to be repeated.
           markProcessed(entry); remove(entry); markSeen(entry.card.id);
@@ -298,6 +307,7 @@ globalThis.ISSBrowseCollector = (() => {
         let record = deps.record({ ...detail, reactions: entry.card.reactions, id: Number(entry.card.id), type: 'image', url: detail.url || entry.card.previewUrl,
           width: detail.width || entry.card.width, height: detail.height || entry.card.height }, { generation: generationData, detail });
         if (!record) { markProcessed(entry); remove(entry); await persist(); return null; }
+        if (!record.creatorName) record.creatorName = creatorName(entry.card.creatorName);
         if (deps.oversize?.(record)) { await skipOversize(entry); return null; }
         if (!String(record.prompt || '').trim()) {
           const existing = await deps.existing?.(record.id);

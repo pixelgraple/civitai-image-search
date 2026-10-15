@@ -88,6 +88,19 @@ globalThis.ISSFeed = (() => {
   function tagNames(value) {
     return Array.isArray(value) ? value.map(tag => typeof tag === 'string' ? tag : tag?.name ?? tag?.tag?.name).filter(Boolean) : [];
   }
+  function imageCreator(image, post = {}) {
+    const normalize = value => {
+      if (typeof value !== 'string') return '';
+      const name = value.trim().replace(/^@/, '');
+      return name && [...name].length <= 200 && !/[\u0000-\u001f\u007f-\u009f]/u.test(name) ? name : '';
+    };
+    // Only the image uploader, or the uploader of a post containing this exact
+    // image. Resource/model authors and the signed-in account are unrelated.
+    const direct = normalize(image?.user?.username) || normalize(image?.username);
+    if (direct) return direct;
+    return Array.isArray(post.images) && post.images.some(item => String(item?.id) === String(image?.id))
+      ? normalize(post.user?.username) || normalize(post.username) : '';
+  }
   function imageReactions(...statsSources) {
     const aliases = {
       likeCount: ['likeCount', 'likeCountAllTime'],
@@ -117,7 +130,7 @@ globalThis.ISSFeed = (() => {
   }
   const hasCoreReactions = value => ['likeCount', 'heartCount', 'laughCount', 'cryCount']
     .every(key => Number.isSafeInteger(value?.[key]) && value[key] >= 0);
-  async function civitaiPageReactions(feed, id, siteRequest) {
+  async function civitaiPageReactions(feed, id, siteRequest, observeCreator) {
     const url = new URL(`/images/${encodeURIComponent(id)}`, feed.pageUrl);
     let result;
     try { result = await siteRequest(url.href); }
@@ -129,6 +142,8 @@ globalThis.ISSFeed = (() => {
       throw error;
     }
     if (String(result?.id) !== String(id)) throw new Error('The image page returned reaction metadata for another image.');
+    const creatorName = imageCreator(result);
+    if (creatorName) await observeCreator?.(creatorName);
     return imageReactions(result.stats);
   }
   function civitaiCatalogRecord(image, post = {}, enrichment = {}) {
@@ -137,6 +152,9 @@ globalThis.ISSFeed = (() => {
     if (!downloadUrl) return null;
     const id = image?.id;
     if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0) return null;
+    if (enrichment.detail && Object.prototype.hasOwnProperty.call(enrichment.detail, 'id') &&
+        (!Number.isSafeInteger(Number(enrichment.detail.id)) || Number(enrichment.detail.id) !== Number(id)))
+      throw new Error('Civitai returned details for a different image. Collection paused to protect metadata attribution.');
     const hasGenerationRead = Object.prototype.hasOwnProperty.call(enrichment, 'generation');
     const meta = hasGenerationRead ? enrichment.generation?.meta || {} : image?.meta || image?.metadata || {};
     // Post descriptions/captions are not generation prompts. A detail read is
@@ -153,7 +171,7 @@ globalThis.ISSFeed = (() => {
     const loras = [...new Set(resources.filter(resource => {
       const type = String(resource?.type ?? resource?.modelType ?? '').toLowerCase();
       return type.includes('lora') || type.includes('locon') || type.includes('dora') || resource?.isLora === true;
-    }).map(resource => promptText(resource?.name ?? resource?.model?.name ?? resource?.modelName)).filter(Boolean))];
+    }).flatMap(resource => [resource?.modelName, resource?.model?.name, resource?.name].map(promptText)).filter(Boolean))];
     const url = typeof image?.url === 'string' ? image.url : '';
     let previewUrl = '';
     try {
@@ -161,10 +179,11 @@ globalThis.ISSFeed = (() => {
       if (['image.civitai.com', 'imagecache.civitai.com'].includes(parsed.hostname)) previewUrl = parsed.href;
     } catch {}
     const reactions = imageReactions(image.stats, image.reactions, enrichment.detail?.stats);
+    const creatorName = imageCreator(enrichment.detail) || imageCreator(image, post);
     const width = imageDimension(enrichment.detail?.width, image.width);
     const height = imageDimension(enrichment.detail?.height, image.height);
     return { id: String(id), pageUrl: `https://civitai.red/images/${encodeURIComponent(id)}`, previewUrl, downloadUrl,
-      prompt, negativePrompt, tags, modelName, loras, reactions,
+      prompt, negativePrompt, tags, modelName, loras, reactions, creatorName,
       ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }),
       updatedAt: Date.now(), source: 'civitai' };
   }
@@ -193,6 +212,9 @@ globalThis.ISSFeed = (() => {
         (procedure === 'image.getGenerationData' ? !('resources' in data || 'meta' in data || 'type' in data) : !('tags' in data))) {
       throw new Error('Civitai image metadata format changed. Collection paused before advancing the feed.');
     }
+    if (procedure === 'image.getDetail' && Object.prototype.hasOwnProperty.call(data, 'id') &&
+        (!Number.isSafeInteger(Number(data.id)) || Number(data.id) !== Number(id)))
+      throw new Error('Civitai returned details for a different image. Collection paused to protect metadata attribution.');
     return data;
   }
   async function civitaiCatalogItems(feed, posts, siteRequest, processImage = task => task(), onProgress = () => {}, readReactions) {
@@ -223,7 +245,7 @@ globalThis.ISSFeed = (() => {
                 await onProgress({ phase: 'metadata-oversize', id: initial.id, completed, total: pending.length });
                 return;
               }
-              const admission = await onProgress({ phase: 'metadata-admit', id: initial.id, reactions: initial.reactions, completed, total: pending.length });
+              const admission = await onProgress({ phase: 'metadata-admit', id: initial.id, reactions: initial.reactions, creatorName: initial.creatorName, completed, total: pending.length });
               if (admission?.skip === true) {
                 records[index] = null; completed++;
                 await onProgress({ phase: 'metadata-skipped', id: initial.id, completed, total: pending.length });
@@ -283,5 +305,5 @@ globalThis.ISSFeed = (() => {
     return { items, catalogItems, cursor, done, count: data.items.length };
   }
   return { fromRequests, next: trpc, decode,
-    civitaiMetadata, civitaiCatalogRecord, civitaiPageReactions, imageReactions, hasCoreReactions, imageExceedsLimits };
+    civitaiMetadata, civitaiCatalogRecord, civitaiPageReactions, imageReactions, imageCreator, hasCoreReactions, imageExceedsLimits };
 })();

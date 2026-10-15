@@ -1,13 +1,13 @@
 // Collect and advance only image galleries chosen by the person. No focus changes.
 (() => {
   'use strict';
-  const VERSION = '2.8.11';
+  const VERSION = '2.8.12';
   if (location.protocol !== 'https:' || !['civitai.com', 'civitai.red'].includes(location.hostname)) return;
   if (window.__ISS_BROWSE_OBSERVER?.version === VERSION) return;
   window.__ISS_BROWSE_OBSERVER?.dispose?.();
   const MAX_TRACKED = 1200, MAX_SEEN = 5000, DOM_BUDGET = 1600, DISCOVERY_BATCH = 60, METADATA_BATCH = 12, MAX_OUTSTANDING = 600, STEP_DELAY = 2000;
   const observed = new Map(), seen = new Map(), seenReactions = new Map();
-  let nextDataText = '', nextDataReactions = new Map(), nextDataUnknown = new Set();
+  let nextDataText = '', nextDataReactions = new Map(), nextDataUnknown = new Set(), nextDataCreators = new Map();
   let disposed = false, busy = false, timer = null, lastUrl = location.href, retryAt = 0, lastScrollAt = 0, lastManualScrollKey = null, walker = null, epoch = 0, statusEpoch = 0;
   let status = { enabled: false, active: false, scrollAllowed: false };
   function speed() {
@@ -64,23 +64,35 @@
     }
     return result;
   }
+  function sourceCreator(image, post = {}) {
+    const name = value => {
+      if (typeof value !== 'string') return '';
+      const normalized = value.trim().replace(/^@/, '');
+      return normalized && [...normalized].length <= 200 && !/[\u0000-\u001f\u007f-\u009f]/u.test(normalized) ? normalized : '';
+    };
+    return name(image?.user?.username) || name(image?.username) ||
+      (Array.isArray(post.images) && post.images.some(item => String(item?.id) === String(image?.id))
+        ? name(post.user?.username) || name(post.username) : '');
+  }
   function pageStats() {
     const text = document.getElementById?.('__NEXT_DATA__')?.textContent || '';
     if (text === nextDataText) return nextDataReactions;
-    nextDataText = text; nextDataReactions = new Map(); nextDataUnknown = new Set();
+    nextDataText = text; nextDataReactions = new Map(); nextDataUnknown = new Set(); nextDataCreators = new Map();
     if (!text || text.length > 8 * 1024 * 1024) return nextDataReactions;
     try {
       const state = JSON.parse(text)?.props?.pageProps?.trpcState;
       for (const query of (state?.json?.queries || state?.queries || []).slice(0, 200)) {
         const key = query.queryKey?.[0], data = query.state?.data;
         if (!Array.isArray(key) || key[0] !== 'image' || !data) continue;
-        const images = key[1] === 'get' ? [data] : ['getInfinite', 'getImagesAsPostsInfinite'].includes(key[1])
-          ? (data.items || []).flatMap(item => Array.isArray(item.images) ? item.images : [item]) : [];
-        for (const item of images.slice(0, 1000)) {
+        const images = key[1] === 'get' ? [{ image: data }] : ['getInfinite', 'getImagesAsPostsInfinite'].includes(key[1])
+          ? (data.items || []).flatMap(post => Array.isArray(post.images) ? post.images.map(image => ({ image, post })) : [{ image: post }]) : [];
+        for (const { image: item, post } of images.slice(0, 1000)) {
           if (!item || (item.type && item.type !== 'image') || !Number.isSafeInteger(Number(item.id))) continue;
           // Exact image object ID only. Post stats and a neighboring image's
           // counts must never be assigned to the currently viewed image.
           if (key[1] === 'get' && Number(query.queryKey?.[1]?.input?.id) !== Number(item.id)) continue;
+          const creatorName = sourceCreator(item, post);
+          if (creatorName) nextDataCreators.set(String(item.id), creatorName);
           if (item.stats?.statsUnknown === true) { nextDataUnknown.add(String(item.id)); continue; }
           const stats = sourceStats(item.stats);
           if (Object.keys(stats).length) nextDataReactions.set(String(item.id), stats);
@@ -144,7 +156,7 @@
     if (nextDataUnknown.has(id)) return {};
     return { ...domReactions(cardRoot(image, id)), ...(stats.get(id) || {}) };
   }
-  const reactionSignature = reactions => JSON.stringify(Object.keys(reactions).sort().map(key => [key, reactions[key]]));
+  const reactionSignature = (reactions, creatorName = '') => JSON.stringify([Object.keys(reactions).sort().map(key => [key, reactions[key]]), creatorName]);
   function resetPage() {
     if (lastUrl === location.href) return;
     lastUrl = location.href; walker = null; lastManualScrollKey = null; observed.clear(); intersection.disconnect(); epoch++;
@@ -177,8 +189,9 @@
       const id = imageId(anchor.href), src = preview(image);
       if (!anchor.isConnected || !id || !src || !onscreen(image)) continue;
       const reactions = reactionsFor(image, id);
-      if (seen.has(id) && (!Object.keys(reactions).length || seenReactions.get(id) === reactionSignature(reactions))) continue;
-      found.set(id, { id, previewUrl: src, width: image.naturalWidth, height: image.naturalHeight, reactions });
+      const creatorName = nextDataCreators.get(id) || '';
+      if (seen.has(id) && ((!Object.keys(reactions).length && !creatorName) || seenReactions.get(id) === reactionSignature(reactions, creatorName))) continue;
+      found.set(id, { id, previewUrl: src, width: image.naturalWidth, height: image.naturalHeight, reactions, creatorName });
       if (found.size >= discoveryBatch()) return [...found.values()];
     }
     const detailId = imageId(location.href);
@@ -191,8 +204,9 @@
       }
       if (image) {
         const reactions = reactionsFor(image, detailId);
-        if (!seen.has(detailId) || (Object.keys(reactions).length && seenReactions.get(detailId) !== reactionSignature(reactions)))
-          found.set(detailId, { id: detailId, previewUrl: preview(image), width: image.naturalWidth, height: image.naturalHeight, reactions });
+        const creatorName = nextDataCreators.get(detailId) || '';
+        if (!seen.has(detailId) || ((Object.keys(reactions).length || creatorName) && seenReactions.get(detailId) !== reactionSignature(reactions, creatorName)))
+          found.set(detailId, { id: detailId, previewUrl: preview(image), width: image.naturalWidth, height: image.naturalHeight, reactions, creatorName });
       }
     }
     return [...found.values()].slice(0, discoveryBatch());
@@ -235,7 +249,7 @@
       resetPage(); if (!enabled() || paused() || !routeAllowed()) return;
       const scanEpoch = epoch, scanStatusEpoch = statusEpoch, pageUrl = location.href;
       observeCards();
-      const cards = collectCards().filter(card => !status.manualPaused || Object.keys(card.reactions).length);
+      const cards = collectCards().filter(card => !status.manualPaused || Object.keys(card.reactions).length || card.creatorName);
       if (cards.length) {
         const response = await send({ type: 'civitai-auto-cards', pageUrl, cards, ...(status.manualPaused ? { reactionsOnly: true } : {}) });
         if (disposed || scanEpoch !== epoch || pageUrl !== location.href) return;
@@ -247,7 +261,7 @@
         for (const id of response.accepted || []) {
           seen.set(String(id), Date.now());
           const card = cards.find(card => card.id === String(id));
-          if (card) seenReactions.set(String(id), reactionSignature(card.reactions));
+          if (card) seenReactions.set(String(id), reactionSignature(card.reactions, card.creatorName));
         }
         while (seen.size > MAX_SEEN) { const id = seen.keys().next().value; seen.delete(id); seenReactions.delete(id); }
         if (response.active === false && !status.manualPaused) return;

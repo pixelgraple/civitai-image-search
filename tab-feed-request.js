@@ -43,7 +43,8 @@ async function requestCivitaiFeedInTab(requestUrl, expectedOrigin, requestDeadli
             const key = query.queryKey?.[0], image = query.state?.data;
             if (key?.[0] === 'image' && key?.[1] === 'get' && Number(query.queryKey?.[1]?.input?.id) === Number(imagePageId) &&
                 Number(image?.id) === Number(imagePageId) && (!image.type || image.type === 'image')) {
-              data = { id: String(imagePageId), stats: image.stats || {} }; break;
+              data = { id: String(imagePageId), stats: image.stats || {},
+                username: typeof image.user?.username === 'string' ? image.user.username : typeof image.username === 'string' ? image.username : '' }; break;
             }
           }
         }

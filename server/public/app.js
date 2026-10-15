@@ -8,7 +8,9 @@
   const reactionTypes = [['likeCount', '👍', 'likes'], ['heartCount', '❤️', 'hearts'], ['laughCount', '😂', 'laughs'], ['cryCount', '😭', 'cries'], ['buzzCount', '⚡', 'Buzz']];
   const communityTypes = [['upvote', '↑', 'Upvote'], ['heart', '❤️', 'Love'], ['laugh', '😂', 'Laugh'], ['wow', '😮', 'Wow']];
   const layoutPreview = new URL(location.href).searchParams.get('preview') === 'layout';
-  const state = { page: 1, pages: 1, limit: layoutPreview ? 48 : 42, total: 0, items: [], filters: { q: '', tag: '', category: '', sort: 'newest' }, request: 0, controller: null, viewerIndex: -1, viewerBusy: false, returnFocus: null, reactionRequest: 0, reactionController: null, community: null };
+  const defaultFilters = { q: '', qMode: 'all', tag: '', tagMode: 'all', lora: '', creator: '', category: '', sort: 'newest' };
+  const filterControls = { q: 'query', qMode: 'qMode', tag: 'tag', tagMode: 'tagMode', lora: 'lora', creator: 'creator', category: 'category', sort: 'sort' };
+  const state = { page: 1, pages: 1, limit: layoutPreview ? 48 : 42, total: 0, items: [], filters: { ...defaultFilters }, pendingFilters: null, request: 0, controller: null, viewerIndex: -1, viewerBusy: false, returnFocus: null, reactionRequest: 0, reactionController: null, community: null };
   const reactionWrites = new Map();
 
   function mediaUrl(value, id) {
@@ -48,7 +50,18 @@
       img.replaceWith(fallback);
     }, { once: true }));
   }
-  function currentFilters() { return { q: $('query').value.trim(), tag: $('tag').value.trim(), category: $('category').value, sort: $('sort').value === 'upvotes' ? 'upvotes' : 'newest' }; }
+  function currentFilters() {
+    return {
+      q: $('query').value.trim(), qMode: $('qMode').value === 'any' ? 'any' : 'all',
+      tag: $('tag').value.split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean).join(', '),
+      tagMode: $('tagMode').value === 'any' ? 'any' : 'all', lora: $('lora').value.trim(),
+      creator: $('creator').value.trim().replace(/^@+/, ''), category: $('category').value,
+      sort: ['upvotes', 'civitai_reactions'].includes($('sort').value) ? $('sort').value : 'newest'
+    };
+  }
+  function setControls(filters) {
+    Object.entries(filterControls).forEach(([key, id]) => { $(id).value = filters[key] ?? defaultFilters[key]; });
+  }
   function syncControls(counts = {}) {
     const selected = state.filters.category;
     $('counts').querySelectorAll('[data-category]').forEach(button => {
@@ -63,7 +76,19 @@
       button.classList.toggle('is-active', selectedQuery);
       button.setAttribute('aria-pressed', String(selectedQuery));
     });
-    $('activeFilters').textContent = [state.filters.q ? `“${state.filters.q}”` : '', state.filters.tag ? `Tag: ${state.filters.tag}` : ''].filter(Boolean).join(' · ');
+    const filters = state.filters;
+    const summaries = [
+      ['q', filters.q ? `${filters.qMode === 'any' ? 'OR' : 'AND'} words: ${filters.q}` : ''],
+      ['tag', filters.tag ? `${filters.tagMode === 'any' ? 'OR' : 'AND'} tags: ${filters.tag}` : ''],
+      ['lora', filters.lora ? `LoRA: ${filters.lora}` : ''],
+      ['creator', filters.creator ? `Creator: @${filters.creator}` : ''],
+      ['category', filters.category ? `Style: ${styleNames[filters.category] || filters.category}` : '']
+    ].filter(([, label]) => label);
+    $('activeFilters').innerHTML = summaries.map(([key, label]) => `<button type="button" class="active-filter" data-clear-filter="${key}" title="Remove ${esc(label)}" aria-label="Remove filter: ${esc(label)}"><span>${esc(label)}</span><span aria-hidden="true">×</span></button>`).join('');
+    $('filterCount').textContent = String(summaries.length);
+    $('filterCount').hidden = summaries.length === 0;
+    $('sortHelp').hidden = filters.sort !== 'civitai_reactions';
+    $('searchContext').hidden = summaries.length === 0 && filters.sort !== 'civitai_reactions';
   }
   function pageNumbers() {
     const pages = new Set([1, state.pages]);
@@ -81,18 +106,24 @@
     $('pagination').innerHTML = `<button type="button" class="page-direction" data-page="${state.page - 1}"${state.page <= 1 ? ' disabled' : ''}>‹ <span>Previous</span></button>${links}<button type="button" class="page-direction" data-page="${state.page + 1}"${state.page >= state.pages ? ' disabled' : ''}><span>Next</span> ›</button><span class="page-summary">Page ${format(state.page)} of ${format(state.pages)}</span>`;
   }
   async function loadPage(targetPage = 1, options = {}) {
-    const filters = currentFilters();
+    const filters = options.filters ? { ...options.filters } : { ...state.filters };
     const request = ++state.request;
     state.controller?.abort();
     const controller = new AbortController(); state.controller = controller;
+    state.pendingFilters = filters;
     $('results').setAttribute('aria-busy', 'true');
+    $('pagination').querySelectorAll('button').forEach(button => { button.disabled = true; });
     $('resultCount').textContent = 'Searching the library…';
     $('viewerStatus').textContent = options.keepViewer ? 'Loading the next page…' : '';
     const params = new URLSearchParams({ action: 'search', ...filters, page: String(Math.max(1, targetPage)), limit: String(state.limit) });
     try {
       const response = await fetch(`api.php?${params}`, { headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal });
       const data = await response.json();
-      if (!response.ok || !data.ok || !Array.isArray(data.items)) throw new Error(data.error || `The search request failed (${response.status}).`);
+      if (!response.ok || !data.ok || !Array.isArray(data.items)) {
+        const error = new Error(data.error || `The search request failed (${response.status}).`);
+        if (response.status === 400) error.name = 'SearchInputError';
+        throw error;
+      }
       if (request !== state.request) return false;
       if (layoutPreview) {
         const sample = data.items.find(row => row.downloadStatus === 'ready' && mediaUrl(row.previewUrl, row.id));
@@ -119,15 +150,20 @@
       return true;
     } catch (error) {
       if (error.name === 'AbortError' || request !== state.request) return false;
-      if (options.keepViewer) { $('viewerStatus').textContent = error.message || 'Unable to load the next page.'; }
+      if (options.keepViewer) { $('viewerStatus').textContent = error.message || 'Unable to load the next page.'; renderPagination(); }
       else {
-        $('resultCount').textContent = 'Search unavailable';
+        $('resultCount').textContent = error.name === 'SearchInputError' ? 'Adjust your search' : 'Search unavailable';
         $('results').classList.add('is-empty');
-        $('results').innerHTML = `<div class="empty"><h1>The library is temporarily unavailable</h1><p>${esc(error.message)}</p><button type="button" id="retrySearch">Try again</button></div>`;
+        $('results').innerHTML = `<div class="empty"><h1>${error.name === 'SearchInputError' ? 'Check your search filters' : 'The library is temporarily unavailable'}</h1><p>${esc(error.message)}</p><button type="button" id="retrySearch">Try again</button></div>`;
         $('pagination').innerHTML = '';
       }
       return false;
-    } finally { if (request === state.request) $('results').setAttribute('aria-busy', 'false'); }
+    } finally {
+      if (request === state.request) {
+        state.pendingFilters = null;
+        $('results').setAttribute('aria-busy', 'false');
+      }
+    }
   }
   function communityCounts(values = {}) {
     return Object.fromEntries(communityTypes.map(([type]) => [type, Math.trunc(number(values?.[type]))]));
@@ -250,7 +286,8 @@
     markImageErrors($('viewerMedia'));
     renderCommunityReactions();
     const tags = Array.isArray(row.tags) ? row.tags : [], loras = Array.isArray(row.loras) ? row.loras : [];
-    $('viewerDetails').innerHTML = `<section class="detail-section detail-identity"><div class="detail-heading"><h1 id="viewerTitle">Image #${esc(row.id)}</h1><span class="detail-style">${esc(styleNames[row.category] || 'Uncertain')}</span></div><p class="detail-meta">${esc(statusText(row))}</p></section>${tags.length ? `<section class="detail-section"><h2>Tags <span>${format(tags.length)}</span></h2><div class="detail-tags">${tags.map(tag => `<button type="button" class="detail-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div></section>` : ''}<section class="detail-section"><div class="detail-heading"><h2>Prompt</h2>${row.prompt ? '<button type="button" id="copyPrompt" class="copy-button">Copy</button>' : ''}</div><div class="prompt-text">${row.prompt ? esc(row.prompt) : '<span class="muted">No prompt was included in the source metadata.</span>'}</div></section>${row.negativePrompt ? `<details class="detail-section negative-prompt"><summary>Negative prompt</summary><div class="prompt-text">${esc(row.negativePrompt)}</div></details>` : ''}<section class="detail-section"><h2>Generation resources</h2><dl class="resources"><dt>Model</dt><dd>${row.modelName ? esc(row.modelName) : '<span class="muted">Not available</span>'}</dd><dt>LoRAs</dt><dd>${loras.length ? loras.map(name => `<span class="resource-name">${esc(name)}</span>`).join('') : '<span class="muted">Not available</span>'}</dd></dl></section><section class="detail-section classification"><h2>Library style</h2><p>${esc(styleNames[row.category] || 'Uncertain')}</p><small>Anime includes fantasy, illustration and animation cues in prompts, tags, model or LoRA names. Other images are sorted as Realistic.</small></section>`;
+    $('viewerDetails').innerHTML = `<section class="detail-section detail-identity"><div class="detail-heading"><h1 id="viewerTitle">Image #${esc(row.id)}</h1><span class="detail-style">${esc(styleNames[row.category] || 'Uncertain')}</span></div><p class="detail-meta">${esc(statusText(row))}</p></section>${tags.length ? `<section class="detail-section"><h2>Tags <span>${format(tags.length)}</span></h2><div class="detail-tags">${tags.map(tag => `<button type="button" class="detail-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div></section>` : ''}<section class="detail-section"><div class="detail-heading"><h2>Prompt</h2>${row.prompt ? '<button type="button" id="copyPrompt" class="copy-button">Copy</button>' : ''}</div><div class="prompt-text">${row.prompt ? esc(row.prompt) : '<span class="muted">No prompt was included in the source metadata.</span>'}</div></section>${row.negativePrompt ? `<details class="detail-section negative-prompt"><summary>Negative prompt</summary><div class="prompt-text">${esc(row.negativePrompt)}</div></details>` : ''}<section class="detail-section"><h2>Generation resources</h2><dl class="resources"><dt>Model</dt><dd>${row.modelName ? esc(row.modelName) : '<span class="muted">Not available</span>'}</dd><dt>LoRAs</dt><dd>${loras.length ? loras.map(name => `<button type="button" class="resource-name resource-search" data-lora="${esc(name)}" title="Search for this LoRA">${esc(name)}<span aria-hidden="true">↗</span></button>`).join('') : '<span class="muted">Not available</span>'}</dd></dl></section><section class="detail-section classification"><h2>Library style</h2><p>${esc(styleNames[row.category] || 'Uncertain')}</p><small>Anime includes fantasy, illustration and animation cues in prompts, tags, model or LoRA names. Other images are sorted as Realistic.</small></section>`;
+    if (row.creatorName) $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('beforeend', `<button type="button" class="creator-search" data-creator="${esc(row.creatorName)}" title="Find images by this creator"><span>Creator</span><b>@${esc(String(row.creatorName).replace(/^@+/, ''))}</b><span aria-hidden="true">↗</span></button>`);
     $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('afterend', `<section class="detail-section source-reaction-section"><div class="detail-heading"><h2>Civitai source reactions</h2><span class="read-only-label">Read-only</span></div><div class="source-reaction-values">${reactionMarkup(row, true)}</div><p>Captured when indexed. Your community reactions are counted separately on this site.</p></section>`);
     $('viewerPrev').disabled = state.viewerBusy || absoluteIndex <= 0;
     $('viewerNext').disabled = state.viewerBusy || absoluteIndex >= state.total - 1;
@@ -278,8 +315,13 @@
       $('viewerPrev').disabled = absoluteIndex <= 0; $('viewerNext').disabled = absoluteIndex >= state.total - 1;
     }
   }
-  function search() { closeViewer(); loadPage(1); }
-  function clearFilters() { $('query').value = ''; $('tag').value = ''; $('category').value = ''; $('filterPanel').open = false; search(); }
+  function search() { closeViewer(); loadPage(1, { filters: currentFilters() }); }
+  function applyFilters() { $('filterPanel').open = false; search(); }
+  function clearFilters() { setControls(defaultFilters); applyFilters(); }
+  function searchRelated(key, value) {
+    setControls({ ...(state.pendingFilters || state.filters), [key]: value });
+    applyFilters();
+  }
   async function loadHealth() {
     try {
       const response = await fetch('api.php?action=health', { headers: { Accept: 'application/json' }, cache: 'no-store' });
@@ -288,13 +330,16 @@
     } catch { $('health').textContent = 'Community image index'; }
   }
   $('searchForm').addEventListener('submit', event => { event.preventDefault(); search(); });
-  $('applyTag').addEventListener('click', () => { $('filterPanel').open = false; search(); });
-  $('tag').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); $('filterPanel').open = false; search(); } });
-  $('category').addEventListener('change', search);
-  $('sort').addEventListener('change', search);
+  $('applyFilters').addEventListener('click', applyFilters);
+  ['tag', 'lora', 'creator'].forEach(id => $(id).addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); applyFilters(); } }));
+  $('qMode').addEventListener('change', search);
+  $('sort').addEventListener('change', () => searchRelated('sort', $('sort').value));
   $('clearFilters').addEventListener('click', clearFilters);
-  $('counts').addEventListener('click', event => { const button = event.target.closest('[data-category]'); if (button) { $('category').value = button.dataset.category; search(); } });
-  $('topics').addEventListener('click', event => { const button = event.target.closest('[data-query]'); if (button) { $('query').value = button.dataset.query; search(); } });
+  $('counts').addEventListener('click', event => { const button = event.target.closest('[data-category]'); if (button) searchRelated('category', button.dataset.category); });
+  $('topics').addEventListener('click', event => { const button = event.target.closest('[data-query]'); if (button) searchRelated('q', button.dataset.query); });
+  $('activeFilters').addEventListener('click', event => { const button = event.target.closest('[data-clear-filter]'); if (button) searchRelated(button.dataset.clearFilter, ''); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && $('filterPanel').open && !$('imageViewer').open) { $('filterPanel').open = false; $('filterPanel').querySelector('summary').focus(); } });
+  document.addEventListener('click', event => { if ($('filterPanel').open && !event.target.closest('#filterPanel')) $('filterPanel').open = false; });
   $('results').addEventListener('click', event => {
     const button = event.target.closest('.gallery-open');
     if (button) openViewer(Number(button.dataset.index), button);
@@ -312,7 +357,11 @@
   });
   $('viewerDetails').addEventListener('click', async event => {
     const tag = event.target.closest('[data-tag]');
-    if (tag) { $('tag').value = tag.dataset.tag; search(); return; }
+    if (tag) { searchRelated('tag', tag.dataset.tag); return; }
+    const lora = event.target.closest('[data-lora]');
+    if (lora) { searchRelated('lora', lora.dataset.lora); return; }
+    const creator = event.target.closest('[data-creator]');
+    if (creator) { searchRelated('creator', creator.dataset.creator); return; }
     const copy = event.target.closest('#copyPrompt'); if (!copy) return;
     try { await navigator.clipboard.writeText(state.items[state.viewerIndex]?.prompt || ''); copy.textContent = 'Copied'; }
     catch { copy.textContent = 'Copy unavailable'; }

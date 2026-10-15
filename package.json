@@ -1,6 +1,6 @@
 {
   "name": "index-civitai",
-  "version": "2.8.11",
+  "version": "2.8.12",
   "private": true,
   "type": "module",
   "scripts": { "test": "node --test tests/*.test.mjs" }
