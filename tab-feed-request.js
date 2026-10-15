@@ -71,10 +71,23 @@ const ISSCivitaiSourceQueue = (() => {
   const lastServed = new Map();
   let turn = 0;
   const notify = () => { try { globalThis.indexCivitaiStatusChanged?.(); } catch {} };
-  const MAX_ACTIVE = 2;
+  const MAX_ACTIVE = 8;
+  const SOURCE_START_LIMIT = 8;
+  // Retain the last eight starts even when a faster profile has aged them out.
+  // A live slowdown must still account for those starts in its longer window.
+  const recentStarts = [], successfulCompletions = [];
   let initialized, saving = Promise.resolve(), active = 0, timer = null;
-  let nextAt = 0, lastStartedAt = 0, cooldownUntil = 0, authStatus = 0, reason = '';
+  let peakActiveCount = 0, cooldownUntil = 0, authStatus = 0, reason = '';
   const speed = () => globalThis.ISSCollectionSpeed?.get() || { sourceIntervalMs: 2000, metadataConcurrency: 12 };
+  function startDelay(now = Date.now()) {
+    const interval = speed().sourceIntervalMs;
+    const inWindow = recentStarts.filter(startedAt => startedAt > now - interval);
+    return inWindow.length >= SOURCE_START_LIMIT ? Math.max(0, inWindow[0] + interval - now) : 0;
+  }
+  function trimCompletions(now = Date.now()) {
+    while (successfulCompletions.length && successfulCompletions[0] <= now - 60000) successfulCompletions.shift();
+    if (successfulCompletions.length > 1800) successfulCompletions.splice(0, successfulCompletions.length - 1800);
+  }
   const pendingLimit = () => Math.max(32, speed().metadataConcurrency + 8,
     (globalThis.ISSImageQueue?.status().active || 0) + 8);
   const storage = () => typeof chrome !== 'undefined' ? chrome.storage?.local : undefined;
@@ -135,14 +148,14 @@ const ISSCivitaiSourceQueue = (() => {
     if (active >= MAX_ACTIVE || timer !== null || !pending.length) return;
     const stopped = blocked();
     if (stopped) { drain(stopped); return; }
-    const delay = nextAt - Date.now();
+    const delay = startDelay();
     if (delay > 0) {
       timer = setTimeout(() => { timer = null; pump(); }, Math.min(delay, 2147483647));
       return;
     }
     // Keep each tab's requests ordered, but give another waiting tab its turn.
     // A page with twelve metadata reads must not hide a new tab's first feed
-    // request behind its entire batch. Global pacing remains unchanged.
+    // request behind its entire batch. Eight starts share one rolling window.
     const owners = new Set(pending.map(entry => entry.owner));
     for (const owner of lastServed.keys()) if (!owners.has(owner)) lastServed.delete(owner);
     let index = 0;
@@ -150,19 +163,22 @@ const ISSCivitaiSourceQueue = (() => {
       if ((lastServed.get(pending[candidate].owner) || 0) < (lastServed.get(pending[index].owner) || 0)) index = candidate;
     }
     const [entry] = pending.splice(index, 1); active++;
-    lastStartedAt = Date.now(); nextAt = lastStartedAt + speed().sourceIntervalMs;
+    peakActiveCount = Math.max(peakActiveCount, active);
+    recentStarts.push(Date.now());
+    if (recentStarts.length > SOURCE_START_LIMIT) recentStarts.shift();
     lastServed.set(entry.owner, ++turn); notify();
     Promise.resolve().then(async () => {
       if (!await entry.isCurrent()) throw Object.assign(new Error('This tab stopped collecting before its source request ran.'), { status: 409, sourceCancelled: true });
       const stopped = blocked(); if (stopped) throw stopped;
       return await entry.task();
-    }).then(entry.resolve, async error => {
+    }).then(value => {
+      successfulCompletions.push(Date.now()); trimCompletions(); entry.resolve(value);
+    }, async error => {
       await rejectSource(error); entry.reject(error);
     }).finally(() => { active--; notify(); pump(); });
     pump();
   }
   globalThis.ISSCollectionSpeed?.subscribe(() => {
-    nextAt = lastStartedAt ? lastStartedAt + speed().sourceIntervalMs : 0;
     if (timer !== null) { clearTimeout(timer); timer = null; }
     notify(); pump();
   });
@@ -181,7 +197,10 @@ const ISSCivitaiSourceQueue = (() => {
       authStatus = 0; reason = ''; await persist(); notify();
       return this.status();
     },
-    status() { return { active: active > 0, activeCount: active, maxActive: MAX_ACTIVE, queued: pending.length, intervalMs: speed().sourceIntervalMs, pendingLimit: pendingLimit(), authStatus,
+    status() { trimCompletions(); return { active: active > 0, activeCount: active, maxActive: MAX_ACTIVE,
+      sourceStartLimit: SOURCE_START_LIMIT, queued: pending.length, intervalMs: speed().sourceIntervalMs,
+      nextStartInMs: pending.length && active < MAX_ACTIVE && !blocked() ? startDelay() : 0,
+      completedLastMinute: successfulCompletions.length, peakActiveCount, pendingLimit: pendingLimit(), authStatus,
       blockedUntil: cooldownUntil, retryAfterMs: Math.max(0, cooldownUntil - Date.now()),
       pauseReason: authStatus ? `Civitai returned HTTP ${authStatus}. Check the site, then start or resume a scan.`
         : cooldownUntil > Date.now() ? reason || 'Civitai requested a collection cooldown.' : '' }; }

@@ -3,6 +3,20 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 export const root = fileURLToPath(new URL('../', import.meta.url));
+export function installCheckpoint(context) {
+  vm.runInContext(fs.readFileSync(path.join(root, 'state-checkpoint.js'), 'utf8'), context);
+  const checkpoint = context.ISSStateCheckpoint;
+  // Existing collector tests use a deterministic microtask checkpoint clock.
+  // Keep the real coalescing algorithm without advancing source-request timers.
+  context.ISSStateCheckpoint = Object.freeze({ create: options => checkpoint.create({ ...options,
+    setTimer: callback => {
+      const timer = { cancelled: false };
+      queueMicrotask(() => { if (!timer.cancelled) callback(); });
+      return timer;
+    },
+    clearTimer: timer => { timer.cancelled = true; }
+  }) });
+}
 export async function harness(saved = {}, options = {}) {
   const storage = structuredClone(saved), started = [], listeners = {}, timerCallbacks = new Map();
   const tabs = new Map([[7, { id: 7, url: 'https://civitai.red/models/99' }]]);
@@ -32,7 +46,8 @@ export async function harness(saved = {}, options = {}) {
     setTimeout, clearTimeout,
     setInterval: () => 0, clearInterval() {} });
   options.setupContext?.(context);
-  context.importScripts = (...files) => files.forEach(file => vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context));
+  context.importScripts = (...files) => files.forEach(file => file === 'state-checkpoint.js'
+    ? installCheckpoint(context) : vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context));
   vm.runInContext(fs.readFileSync(path.join(root, 'background.js'), 'utf8'), context);
   await vm.runInContext('ready', context);
   const run = code => vm.runInContext(code, context);

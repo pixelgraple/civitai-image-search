@@ -201,20 +201,24 @@ try {
             $prompt=cut_text(trim(is_string($item['prompt']??null)?$item['prompt']:''),20000);
             if (has_positive_prompt($prompt)) $eligibleIds[$id]=true;
             else {
-                $existing->execute([$id]); $prior=$existing->fetch();
+                $existing->execute([$id]); $prior=$existing->fetch(); $existing->closeCursor();
                 if ($prior && has_positive_prompt((string)$prior['prompt'])) $eligibleIds[$id]=true;
             }
         }
         // Rejected new promptless records cannot leave arbitrary lock files. Only process IDs
         // selected here, even if another request creates a usable record before our transaction.
         $locks=$eligibleIds ? lock_image_ids(array_keys($eligibleIds)) : [];
+        $ingestTransaction=false;
         try {
             $inspections=[];
             foreach (array_keys($eligibleIds) as $id) {
                 $existing->execute([(string)$id]); $storedRow=$existing->fetch(); $existing->closeCursor();
                 $inspections[$id]=$storedRow ? inspect_image_storage($storedRow) : null;
             }
-            $pdo->beginTransaction();
+            // Reserve the writer before reading rows that will be updated. A deferred
+            // WAL read-to-write upgrade can fail immediately when another writer commits,
+            // bypassing busy_timeout and forcing the extension to resend the whole batch.
+            $pdo->exec('BEGIN IMMEDIATE'); $ingestTransaction=true;
             foreach ($items as $item) {
                 if (!is_array($item) || !valid_image_id($item['id']??null) || !isset($eligibleIds[(string)$item['id']]) || !($url=safe_image_url($item['downloadUrl']??$item['sourceUrl']??null))) { $skipped++; continue; }
                 $prompt=cut_text(trim(is_string($item['prompt']??null)?$item['prompt']:''),20000); $negative=cut_text(trim((string)($item['negativePrompt']??'')),10000);
@@ -222,7 +226,7 @@ try {
                 $creator=normalize_creator_name($item['creatorName']??null);
                 $pageUrl=normalize_captured_page_url($item['capturedPageUrl']??null,(string)$item['id']);
                 $reactions=normalize_reactions($item['reactions']??null); $width=image_dimension($item['width']??null); $height=image_dimension($item['height']??null);
-                $existing->execute([(string)$item['id']]); $prior=$existing->fetch();
+                $existing->execute([(string)$item['id']]); $prior=$existing->fetch(); $existing->closeCursor();
                 if (image_size_exceeds_limits($item['width']??0,$item['height']??0)) {
                     skip_image_collection($pdo,(string)$item['id'],$item['width']??0,$item['height']??0);
                     $skipped++; $skippedItems[]=['imageId'=>(string)$item['id'],'reason'=>'oversize']; continue;
@@ -264,8 +268,12 @@ try {
                     $pdo->prepare('INSERT OR IGNORE INTO image_download_lanes(image_id,lane_key) VALUES(?,?)')->execute([(string)$item['id'],$laneKey]);
                 }
             }
-            $pdo->commit();
-        } catch (Throwable $error) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $error; }
+            $pdo->exec('COMMIT'); $ingestTransaction=false;
+        } catch (Throwable $error) {
+            // PDO does not track transactions opened with explicit BEGIN IMMEDIATE.
+            if ($ingestTransaction) $pdo->exec('ROLLBACK');
+            throw $error;
+        }
         finally { unlock_image_ids($locks); }
         json_response(['ok'=>true,'accepted'=>$saved,'skipped'=>$skipped,'skippedItems'=>$skippedItems,'imageCopiesQueued'=>count($queuedIds)]);
     }

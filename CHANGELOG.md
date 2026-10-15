@@ -2,6 +2,24 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.16
+
+- Let waiting source requests fill up to eight active slots together. Replace the one-start-at-a-time delay with at most eight starts per rolling collection-speed window.
+- Keep the eight-request global ceiling, fair tab selection, 600-image backlog cap, cancellation checks, source cooldowns and request deadlines.
+- Show successful source requests in the last minute and peak active requests for the current background session, so quickly completed requests remain visible as progress.
+- Clarify the live speed description: the interval applies to a group of up to eight starts.
+- Acquire the SQLite writer before reading mutable ingestion rows, avoiding a transaction-upgrade race that forced image batches to retry with HTTP 503 during concurrent metadata repairs.
+
+## 2.8.15
+
+- Raise the shared Civitai request ceiling from two to eight active requests across all tabs, with the live status denominator updated to eight.
+- Keep the collection-speed setting and Civitai-requested cooldowns in effect.
+- Combine repeated manual and automatic queue saves into bounded checkpoints, reducing browser storage churn during long scans.
+- Keep at most one state snapshot being written and one pending save group, instead of retaining a full history copy for every image event.
+- Preserve queued prompts, scan history, counters and duplicate checks. Queue ownership is released only after its removal is saved.
+- Upload concurrency, source pacing and the shared 600-image limit remain unchanged.
+- Include the website tag-search optimization and compact WebP gallery previews; full-size originals remain unchanged.
+
 ## 2.8.14
 
 - Show creator usernames beneath the image heading, with a two-tab action for their Civitai profile and exact-username library search.

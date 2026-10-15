@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { installCheckpoint } from './background-harness.mjs';
 const source = fs.readFileSync(new URL('../civitai-auto-background.js', import.meta.url), 'utf8');
 const blankCard = id => ({ id: String(id), previewUrl: `https://image.civitai.com/key/${id}/width=450/${id}.jpeg`, width: 450, height: 600 });
 const initialCloud = { apiBase: 'https://search-civitai.xyz/api.php' };
@@ -9,7 +10,8 @@ const pageUrl = 'https://civitai.red/models/99';
 function harness(storage = {}, overrides = {}) {
   let now = 100000, cloud = { ...initialCloud }, manual = false;
   const calls = [], uploads = [], stored = [], tabs = new Map([[7, { id: 7, url: pageUrl }], [8, { id: 8, url: pageUrl }]]);
-  const context = vm.createContext({ URL, console, Date: { now: () => now } });
+  const context = vm.createContext({ URL, console, structuredClone, Date: { now: () => now } });
+  installCheckpoint(context);
   vm.runInContext(source, context);
   const deps = {
     config: async () => cloud, load: async key => structuredClone(storage[key]),
@@ -425,10 +427,9 @@ test('automatic capacity is released only after the latest queued ownership snap
   for (let index = 0; index < 20; index++) await Promise.resolve();
   assert.equal(commits.length, 1); commits.shift()(); await first;
   for (let index = 0; index < 20; index++) await Promise.resolve();
-  assert.equal(releases.length, 0); commits.shift()(); await added;
-  for (let index = 0; index < 20; index++) await Promise.resolve();
-  assert.equal(releases.length, 0); assert.equal(storage.civitaiBrowseCollectorV1.pending.length, 1);
-  commits.shift()(); await last;
+  assert.equal(releases.length, 0); assert.equal(commits.length, 1);
+  commits.shift()(); await Promise.all([added, last]);
+  assert.equal(commits.length, 0, 'intermediate ownership changes share one pending checkpoint');
   assert.deepEqual(releases, ['55']); assert.equal(storage.civitaiBrowseCollectorV1.pending.length, 0);
 });
 

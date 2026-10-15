@@ -45,31 +45,42 @@ function harness(saved = {}) {
   return api;
 }
 
-test('all tabs share at most two active source requests with paced starts', async () => {
+test('all tabs share at most eight active source requests with rolling window starts', async () => {
   const h = harness(), releases = [];
-  h.reply = () => h.calls.length <= 2 ? new Promise(resolve => { releases.push(resolve); }) : success();
-  const first = observe(h.request(7)), second = observe(h.request(8)), third = observe(h.request(9));
-  await h.flush(); assert.equal(h.calls.length, 1); assert.equal((await h.state()).queued, 2);
-  await h.advance(1999); assert.equal(h.calls.length, 1);
-  await h.advance(1); assert.equal(h.calls.length, 2); assert.equal((await h.state()).activeCount, 2);
-  await h.advance(5000); assert.equal(h.calls.length, 2, 'third request waits for one of the two slots');
-  releases[0](success()); await h.flush(); assert.equal((await first).ok, true); assert.equal((await third).ok, true);
-  releases[1](success()); await h.flush(); assert.equal((await second).ok, true);
-  assert.deepEqual(h.calls.map(call => call.tabId), [7, 8, 9]);
-  assert.equal(h.calls[1].time - h.calls[0].time, 2000);
-  assert.equal(h.calls[2].time - h.calls[1].time, 5000);
+  h.reply = () => h.calls.length <= 8 ? new Promise(resolve => { releases.push(resolve); }) : success();
+  const work = Array.from({ length: 9 }, (_, index) => observe(h.request(index + 7)));
+  await h.flush(); assert.equal(h.calls.length, 8); assert.equal((await h.state()).queued, 1);
+  assert.equal((await h.state()).completedLastMinute, 0);
+  assert.equal((await h.state()).peakActiveCount, 8);
+  assert.equal((await h.state()).nextStartInMs, 0, 'the next start also needs an active slot');
+  await h.advance(1999); assert.equal(h.calls.length, 8);
+  await h.advance(1); assert.equal(h.calls.length, 8, 'an expired start window does not bypass the active cap');
+  assert.equal((await h.state()).activeCount, 8); assert.equal((await h.state()).maxActive, 8);
+  await h.advance(3000); assert.equal(h.calls.length, 8, 'ninth request waits for one of the eight slots');
+  releases[0](success()); await h.flush(); assert.equal((await work[0]).ok, true); assert.equal((await work[8]).ok, true);
+  releases.slice(1).forEach(release => release(success())); await h.flush();
+  assert.equal((await Promise.all(work)).every(result => result.ok), true);
+  assert.deepEqual(h.calls.map(call => call.tabId), [7, 8, 9, 10, 11, 12, 13, 14, 15]);
+  assert.ok(h.calls.slice(1, 8).every(call => call.time === h.calls[0].time));
+  assert.equal(h.calls[8].time - h.calls[7].time, 5000);
   assert.equal((await h.state()).intervalMs, 2000);
+  assert.equal((await h.state()).sourceStartLimit, 8);
+  assert.equal((await h.state()).completedLastMinute, 9);
+  await h.advance(60000); assert.equal((await h.state()).completedLastMinute, 0);
 });
-test('a rejection with two source requests active prevents every further start through cooldown', async () => {
+test('a rejection with eight source requests active prevents every further start through cooldown', async () => {
   const h = harness(), releases = [];
   h.reply = () => new Promise(resolve => releases.push(resolve));
-  const work = [observe(h.request(7)), observe(h.request(8)), observe(h.request(9))];
-  await h.flush(); await h.advance(2000); assert.equal(h.calls.length, 2);
+  const work = Array.from({ length: 9 }, (_, index) => observe(h.request(index + 7)));
+  await h.flush();
+  assert.equal(h.calls.length, 8); assert.equal((await h.state()).activeCount, 8);
   releases[0](failure(429, '600')); await h.flush();
-  assert.equal((await work[0]).error.status, 429); assert.equal((await work[2]).error.status, 429);
-  releases[1](success()); await h.flush(); assert.equal((await work[1]).ok, true);
-  await h.advance(599999); assert.equal(h.calls.length, 2);
-  const refused = await observe(h.request(10)); assert.equal(refused.error.retryAfterMs, 1);
+  assert.equal((await work[0]).error.status, 429); assert.equal((await work[8]).error.status, 429);
+  assert.equal((await h.state()).completedLastMinute, 0, 'failed requests are not counted as completed successfully');
+  releases.slice(1).forEach(release => release(success())); await h.flush();
+  assert.equal((await Promise.all(work.slice(1, 8))).every(result => result.ok), true);
+  await h.advance(599999); assert.equal(h.calls.length, 8);
+  const refused = await observe(h.request(16)); assert.equal(refused.error.retryAfterMs, 1);
 });
 
 test('new tabs get source turns before another tab exhausts twelve metadata requests', async () => {
@@ -78,11 +89,12 @@ test('new tabs get source turns before another tab exhausts twelve metadata requ
   await h.flush();
   work.push(observe(h.request(8)), observe(h.request(8)), observe(h.request(9)), observe(h.request(9)));
   await h.flush();
-  for (let index = 0; index < 15; index++) await h.advance(2000);
+  assert.equal(h.calls.length, 8); assert.equal((await h.state()).nextStartInMs, 2000);
+  await h.advance(1999); assert.equal(h.calls.length, 8); assert.equal((await h.state()).nextStartInMs, 1);
+  await h.advance(1);
   assert.equal((await Promise.all(work)).every(result => result.ok), true);
-  assert.deepEqual(h.calls.slice(0, 6).map(call => call.tabId), [7, 8, 9, 7, 8, 9]);
-  assert.equal(h.calls[1].time - h.calls[0].time, 2000);
-  assert.ok(h.calls.slice(1).every((call, index) => call.time - h.calls[index].time >= 2000));
+  assert.deepEqual(h.calls.slice(8, 14).map(call => call.tabId), [8, 9, 7, 8, 9, 7]);
+  assert.ok(h.calls.slice(8).every((call, index) => call.time - h.calls[index].time >= 2000));
   assert.equal((await h.state()).queued, 0);
 });
 
@@ -100,15 +112,15 @@ test('source transitions notify live activity without making status reads create
 
 test('429 drains every queued tab and preserves a long Retry-After without shortening it', async () => {
   const h = harness(); h.reply = () => failure(429, '900');
-  const results = [7, 8, 9].map(id => observe(h.request(id))); await h.flush();
+  const results = Array.from({ length: 11 }, (_, index) => observe(h.request(index + 7))); await h.flush();
   for (const result of await Promise.all(results)) { assert.equal(result.ok, false); assert.equal(result.error.status, 429); assert.equal(result.error.retryAfterMs, 900000); }
-  assert.equal(h.calls.length, 1); assert.equal((await h.state()).queued, 0);
+  assert.equal(h.calls.length, 8); assert.equal((await h.state()).queued, 0);
   assert.equal(h.storage.indexCivitaiSourceGuardV1.cooldownUntil, h.now() + 900000);
   await h.resume(); assert.equal((await observe(h.request(10))).error.status, 429);
   await h.advance(899999); assert.equal((await observe(h.request(10))).error.retryAfterMs, 1);
-  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls.length, 8);
   await h.advance(1); h.reply = success;
-  assert.equal((await observe(h.request(10))).ok, true); assert.equal(h.calls.length, 2);
+  assert.equal((await observe(h.request(10))).ok, true); assert.equal(h.calls.length, 9);
 });
 
 test('HTTP-date Retry-After uses the full requested deadline', async () => {
@@ -130,9 +142,9 @@ test('source cooldown survives a service worker restart and makes no speculative
 
 for (const status of [401, 403]) test(`HTTP ${status} stops all tabs until a deliberate manual resume, including after restart`, async () => {
   const h = harness(); h.reply = () => failure(status);
-  const results = [7, 8, 9].map(id => observe(h.request(id))); await h.flush();
+  const results = Array.from({ length: 11 }, (_, index) => observe(h.request(index + 7))); await h.flush();
   for (const result of await Promise.all(results)) assert.equal(result.error.status, status);
-  assert.equal(h.calls.length, 1); assert.equal((await h.state()).authStatus, status);
+  assert.equal(h.calls.length, 8); assert.equal((await h.state()).authStatus, status);
   const restored = harness(h.storage); await restored.advance(86400000);
   assert.equal((await observe(restored.request(8))).error.status, status); assert.equal(restored.calls.length, 0);
   await restored.resume(); assert.equal((await observe(restored.request(8))).ok, true);
@@ -147,24 +159,25 @@ test('HTTP 200 tRPC rejection still pauses the shared queue', async () => {
 
 test('stopped source runs are cancelled before their queued request reaches Civitai', async () => {
   const h = harness(); let current = true;
-  const first = observe(h.request(7)), stopped = observe(h.request(8, () => current)), third = observe(h.request(9));
-  await h.flush(); assert.equal((await first).ok, true); current = false;
+  const first = Array.from({ length: 8 }, () => observe(h.request(7)));
+  const stopped = observe(h.request(8, () => current)), third = observe(h.request(9));
+  await h.flush(); assert.ok((await Promise.all(first)).every(result => result.ok)); current = false;
   await h.advance(2000); const cancelled = await stopped;
-  assert.equal(cancelled.error.sourceCancelled, true); assert.equal(h.calls.length, 1);
-  await h.advance(2000); assert.equal((await third).ok, true);
-  assert.deepEqual(h.calls.map(call => call.tabId), [7, 9]);
+  assert.equal(cancelled.error.sourceCancelled, true); assert.equal(h.calls.length, 9);
+  assert.equal((await third).ok, true);
+  assert.deepEqual(h.calls.map(call => call.tabId), [...Array(8).fill(7), 9]);
 });
 
 test('source queue has a fixed pending bound and overflow sends no source request', async () => {
-  const h = harness(); let release;
-  h.reply = () => new Promise(resolve => { release = resolve; });
-  const results = Array.from({ length: 36 }, (_, index) => observe(h.request(index + 1)));
-  await h.flush(); assert.equal(h.calls.length, 1); assert.equal((await h.state()).queued, 32);
-  release(failure(429, '60')); await h.flush();
+  const h = harness(), releases = [];
+  h.reply = () => new Promise(resolve => { releases.push(resolve); });
+  const results = Array.from({ length: 43 }, (_, index) => observe(h.request(index + 1)));
+  await h.flush(); assert.equal(h.calls.length, 8); assert.equal((await h.state()).queued, 32);
+  releases.forEach(release => release(failure(429, '60'))); await h.flush();
   const completed = await Promise.all(results);
   assert.equal(completed.filter(result => result.error.status === 503).length, 3);
-  assert.equal(completed.filter(result => result.error.status === 429).length, 33);
-  assert.equal(h.calls.length, 1); assert.equal((await h.state()).queued, 0);
+  assert.equal(completed.filter(result => result.error.status === 429).length, 40);
+  assert.equal(h.calls.length, 8); assert.equal((await h.state()).queued, 0);
 });
 
 test('invalid tab ids and checking source status never create source requests', async () => {
@@ -175,17 +188,19 @@ test('invalid tab ids and checking source status never create source requests', 
 
 test('503 with Retry-After also drains source work and shares the full cooldown', async () => {
   const h = harness(); h.reply = () => failure(503, '700');
-  const one = observe(h.request(7)), two = observe(h.request(8));
-  assert.equal((await one).error.status, 503); assert.equal((await two).error.status, 429);
-  assert.equal((await h.state()).retryAfterMs, 700000); assert.equal(h.calls.length, 1);
+  const work = Array.from({ length: 9 }, (_, index) => observe(h.request(index + 7)));
+  const results = await Promise.all(work);
+  assert.ok(results.slice(0, 8).every(result => result.error.status === 503)); assert.equal(results[8].error.status, 429);
+  assert.equal((await h.state()).retryAfterMs, 700000); assert.equal(h.calls.length, 8);
 });
 
 test('upstream 5xx failures stop queued tabs for a shared recovery pause', async () => {
   for (const status of [500, 502, 504]) {
     const h = harness(); h.reply = () => failure(status);
-    const one = observe(h.request(7)), two = observe(h.request(8));
-    assert.equal((await one).error.status, status); assert.equal((await two).error.status, 429);
-    assert.equal((await h.state()).retryAfterMs, 60000); assert.equal(h.calls.length, 1);
+    const work = Array.from({ length: 9 }, (_, index) => observe(h.request(index + 7)));
+    const results = await Promise.all(work);
+    assert.ok(results.slice(0, 8).every(result => result.error.status === status)); assert.equal(results[8].error.status, 429);
+    assert.equal((await h.state()).retryAfterMs, 60000); assert.equal(h.calls.length, 8);
   }
 });
 

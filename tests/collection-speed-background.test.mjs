@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { harness } from './background-harness.mjs';
+import { harness, installCheckpoint } from './background-harness.mjs';
 
 const CONFIG = 'civitaiPromptCloud';
 const STATE = 'aiImageDatasetScraperStateV6';
@@ -43,13 +43,14 @@ function installClock(context) {
 
 function queues(files = []) {
   const storage = {};
-  const context = vm.createContext({ URL, AbortSignal, Promise, console,
+  const context = vm.createContext({ URL, AbortSignal, Promise, console, structuredClone,
     chrome: { runtime: { lastError: null }, storage: { local: {
       get: (_key, callback) => queueMicrotask(() => callback(structuredClone(storage))),
       set: (value, callback) => { Object.assign(storage, structuredClone(value)); queueMicrotask(callback); }
     } } }
   });
   const clock = installClock(context);
+  installCheckpoint(context);
   for (const name of ['collection-speed.js', ...files]) vm.runInContext(source(name), context);
   return { context, clock, storage, speed: context.ISSCollectionSpeed,
     run: text => vm.runInContext(text, context) };
@@ -183,24 +184,27 @@ test('5x still caps all automatic tabs at600 unique durable records including pa
   assert.equal(restored.run('pipelineSnapshot().outstandingTotal'), 600);
 });
 
-test('live source speed changes shorten and lengthen completion-based waits without overlapping tabs', async () => {
+test('live source speed changes shorten and lengthen rolling windows while retaining recent starts', async () => {
   const h = queues(['tab-feed-request.js']), queue = h.run('ISSCivitaiSourceQueue'), starts = [];
   const request = owner => queue.enqueue(() => { starts.push({ owner, time: h.clock.now() }); return owner; }, () => true, owner);
-  await request(7); await flush();
-  const second = request(8); await flush(); await h.clock.advance(100);
-  h.speed.set(5); await h.clock.advance(299); assert.equal(starts.length, 1);
-  await h.clock.advance(1); assert.equal(await second, 8); assert.equal(starts[1].time - starts[0].time, 400);
-  const third = request(9); await flush(); h.speed.set(1);
-  await h.clock.advance(1999); assert.equal(starts.length, 2);
-  await h.clock.advance(1); assert.equal(await third, 9); assert.equal(starts[2].time - starts[1].time, 2000);
+  await Promise.all(Array.from({ length: 8 }, () => request(7))); await flush();
+  const second = Promise.all(Array.from({ length: 8 }, () => request(8))); await flush(); await h.clock.advance(100);
+  h.speed.set(5); await h.clock.advance(299); assert.equal(starts.length, 8);
+  await h.clock.advance(1); assert.deepEqual(await second, Array(8).fill(8));
+  assert.equal(starts[8].time - starts[0].time, 400);
+  await h.clock.advance(500); queue.status();
+  h.speed.set(1); const third = request(9); await flush();
+  assert.equal(queue.status().nextStartInMs, 1500, 'a slowdown remembers starts outside the previous shorter window');
+  await h.clock.advance(1499); assert.equal(starts.length, 16);
+  await h.clock.advance(1); assert.equal(await third, 9); assert.equal(starts[16].time - starts[8].time, 2000);
 });
 
 test('max speed admits60 metadata source jobs fairly without local queue-overflow errors', async () => {
   const h = queues(['tab-feed-request.js']), queue = h.run('ISSCivitaiSourceQueue'), starts = [];
   h.speed.set(5);
   const jobs = Array.from({ length: 60 }, (_, index) => observe(queue.enqueue(() => { starts.push(index % 3); return index; }, () => true, index % 3)));
-  await flush(); assert.equal(starts.length, 1); assert.equal(queue.status().queued, 59);
-  for (let index = 0; index < 59; index++) await h.clock.advance(400);
+  await flush(); assert.equal(starts.length, 8); assert.equal(queue.status().queued, 52);
+  for (let index = 0; index < 7; index++) await h.clock.advance(400);
   assert.ok((await Promise.all(jobs)).every(result => result.ok));
   assert.deepEqual(starts.slice(0, 9), [0, 1, 2, 0, 1, 2, 0, 1, 2]);
   assert.equal(queue.status().queued, 0);

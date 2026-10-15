@@ -1,11 +1,11 @@
 // Index Civitai sends prompt metadata and source URLs to the public shared catalog.
 // The server owns image transfers. This extension has no file download API.
-importScripts('collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
+importScripts('state-checkpoint.js', 'collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
 
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.14', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.16', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -258,22 +258,28 @@ function pipelineSnapshot(tabId) {
     metadataConcurrency: ISSCollectionSpeed.get().metadataConcurrency, uploadBatchSize: ISSCollectionSpeed.get().uploadBatchSize,
     uploadIntervalMs: ISSCollectionSpeed.get().uploadIntervalMs, collectionSpeed: ISSCollectionSpeed.get() };
 }
+const manualCheckpoint = ISSStateCheckpoint.create({
+  capture: () => {
+    for (const value of sessions.values()) recalcCounts(value);
+    const value = structuredClone({ version: RUN_VERSION, runs: [...sessions.values()] });
+    const owned = new Map(value.runs.map(run => [run.sessionTabId, new Set(run.outstandingIds)]));
+    const retired = [...outstandingImages].flatMap(([id, entry]) => [...entry.owners.values()]
+      .filter(owner => owner.kind === 'manual' && !owned.get(owner.tabId)?.has(id))
+      .map(owner => ({ id, tabId: owner.tabId })));
+    return { value, retired };
+  },
+  write: snapshot => writeStorage(STATE_KEY, snapshot.value),
+  committed: (snapshot, latest) => {
+    // A superseded checkpoint cannot release capacity while a newer state is
+    // still waiting to be saved. Recheck live ownership after durable removal.
+    if (latest) for (const owner of snapshot.retired)
+      if (!sessions.get(owner.tabId)?.outstandingIds.includes(owner.id)) releaseOutstanding(owner.id, 'manual', owner.tabId);
+  }
+});
 function persistState(run) {
   if (run && sessions.get(run.sessionTabId) !== run) return Promise.resolve();
   notifyStatusChanged();
-  for (const value of sessions.values()) recalcCounts(value);
-  const snapshot = structuredClone({ version: RUN_VERSION, runs: [...sessions.values()] });
-  const retired = [...outstandingImages].flatMap(([id, entry]) => [...entry.owners.values()]
-    .filter(owner => owner.kind === 'manual' && !snapshot.runs.find(value => value.sessionTabId === owner.tabId)?.outstandingIds.includes(id))
-    .map(owner => ({ id, tabId: owner.tabId })));
-  const next = persistChain.catch(() => {}).then(async () => {
-    await writeStorage(STATE_KEY, snapshot);
-    // An older queued snapshot must not release capacity before a newer queued
-    // snapshot that may still own the ID has reached durable storage.
-    if (persistChain === next) for (const owner of retired)
-      if (!sessions.get(owner.tabId)?.outstandingIds.includes(owner.id)) releaseOutstanding(owner.id, 'manual', owner.tabId);
-  });
-  persistChain = next; return next;
+  persistChain = manualCheckpoint.request(); return persistChain;
 }
 function addDebug(stage, message, data = {}) {
   const safe = {};

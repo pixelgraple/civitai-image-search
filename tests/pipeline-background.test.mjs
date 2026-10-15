@@ -162,21 +162,21 @@ test('storage commits ownership removal before capacity can be reused after a su
   assert.deepEqual(h.storage[key].runs[0].outstandingIds, []);
 });
 
-test('an older removal snapshot cannot release capacity ahead of a queued ownership snapshot', async () => {
+test('an older removal checkpoint waits for the latest coalesced ownership save', async () => {
   const h = await harness(); addRun(h); await h.run('admitManualImage("1",sessions.get(7),()=>true)');
   const commits = [], set = h.context.chrome.storage.local.set;
   h.context.chrome.storage.local.set = (data, callback) => {
     if (data[key]) commits.push(() => set(data, callback)); else set(data, callback);
   };
   h.run('releaseManualImage(sessions.get(7),"1")'); const first = h.run('persistState(sessions.get(7))');
+  await until(() => commits.length === 1);
   h.run('sessions.get(7).outstandingIds=["1"]'); const second = h.run('persistState(sessions.get(7))');
   h.run('releaseManualImage(sessions.get(7),"1")'); const last = h.run('persistState(sessions.get(7))');
-  await until(() => commits.length === 1); commits.shift()(); await first;
+  commits.shift()(); await first;
   assert.equal(h.run('pipelineSnapshot().outstandingTotal'), 1);
-  await until(() => commits.length === 1); commits.shift()(); await second;
-  assert.deepEqual(h.storage[key].runs[0].outstandingIds, ['1']);
-  assert.equal(h.run('pipelineSnapshot().outstandingTotal'), 1);
-  await until(() => commits.length === 1); commits.shift()(); await last;
+  await until(() => commits.length === 1); commits.shift()(); await Promise.all([second, last]);
+  assert.deepEqual(h.storage[key].runs[0].outstandingIds, []);
+  assert.equal(commits.length, 0, 'intermediate ownership changes share one pending checkpoint');
   assert.equal(h.run('pipelineSnapshot().outstandingTotal'), 0);
 });
 

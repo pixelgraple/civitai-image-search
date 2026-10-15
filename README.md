@@ -4,7 +4,7 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.14](https://search-civitai.xyz/downloads/index-civitai-2.8.14.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.14)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.16](https://search-civitai.xyz/downloads/index-civitai-2.8.16.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.16)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Public browsing and contribution require no account or contributor key.
 
@@ -30,7 +30,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.14.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.16.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.
@@ -85,8 +85,8 @@ The server validates IDs and approved Civitai HTTPS source hosts, verifies file 
 | Stage | Current behavior |
 | --- | --- |
 | Outstanding images | **600 unique images total across all tabs**, including browsing and feed scans. Discovery and scrolling pause at the cap and resume as capacity becomes available. |
-| Collection speed | **1×–5×**, in steps of 0.5, applied live across tabs. Adjusts discovery, scrolling, metadata slots and source request spacing. |
-| Source requests | At most **two actual Civitai requests active globally**. Starts are paced from two seconds at 1× to 400 ms at 5×. |
+| Collection speed | **1×–5×**, in steps of 0.5, applied live across tabs. Adjusts discovery, scrolling, metadata slots and source request windows. |
+| Source requests | At most **eight actual Civitai requests active globally across all tabs**. Up to eight starts are allowed per rolling window: two seconds at 1× down to 400 ms at 5×. Waiting requests can fill free slots together instead of starting one at a time. The live counter also shows successful source requests in the last minute and peak concurrency this background session. Requests are not the same as images: one image can require several metadata reads. Cooldowns still stop all tabs. |
 | Metadata processing | Rolling slots: completed prompts can move forward without waiting for the slowest image or optional reaction lookup. |
 | Metadata submission | Up to **60 prompt records per batch**, with a **three-second pause** after a batch. Smaller batches are sent when fewer records are ready. This stays the same at every speed setting. |
 | Server image downloads | **Up to 32 concurrent transfers total**, with a live **4–32 target for each tab**. Vacant slots are refilled without waiting for a whole batch. Downloads stream to temporary files; thumbnails are generated individually. |

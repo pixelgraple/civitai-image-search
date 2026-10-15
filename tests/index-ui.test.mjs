@@ -30,8 +30,8 @@ function transportHarness({ connectFails = false } = {}) {
 }
 const speedProfile = multiplier => ({ multiplier, metadataConcurrency: Math.round(12 * multiplier), uploadBatchSize: 60, uploadIntervalMs: 3000, sourceIntervalMs: Math.round(1000 / multiplier), outstandingLimit: 600 });
 const speedConfig = multiplier => ({ speedMultiplier: multiplier, collectionSpeed: speedProfile(multiplier) });
-const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.14', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
-function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.14', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.16', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
+function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.16', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], requests = [], intervals = [], intervalDelays = [];
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -56,7 +56,7 @@ function libraryHarness({ config = {}, failSave = false, failFetch = false, scan
   } });
   return { get, cloud, messages, requests, intervals, intervalDelays, transport };
 }
-function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.14', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.16', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], events = {};
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -219,10 +219,10 @@ test('panel displays a shared source cooldown',async()=>{
   assert.match(h.get('sourceStatus').textContent,/Civitai cooldown: \d+s/);
 });
 test('panel distinguishes actual source traffic from a catalog error and countdown', async () => {
-  const h = panelHarness({ source: { activeCount: 2, maxActive: 2, queued: 17 },
+  const h = panelHarness({ source: { activeCount: 2, maxActive: 8, queued: 17 },
     browse: { catalog: { lastError: 'Shared catalog returned HTTP 503 (check). Image storage is busy.', retryAt: Date.now() + 30000 } } });
   await flush(); const text = h.get('sourceStatus').textContent;
-  assert.match(text, /2 \/ 2 requests active.*17 waiting/); assert.match(text, /Server:.*503.*storage is busy.*Retry in \d+s/);
+  assert.match(text, /2 \/ 8 requests active.*17 waiting/); assert.match(text, /Server:.*503.*storage is busy.*Retry in \d+s/);
   assert.doesNotMatch(text, /Civitai cooldown/);
 });
 
@@ -439,7 +439,7 @@ test('effective speed limits come from the background profile rather than multip
     const h = create({ config }); await flush();
     assert.equal(h.get('collectionSpeed').value, '2.5'); assert.equal(h.get('speedValue').textContent, '2.5×');
     assert.equal(h.get('collectionSpeed').attributes['aria-valuetext'], '2.5 times normal speed');
-    assert.match(h.get('speedEffective').textContent, /Prompt readers: 17 concurrent.*0.65s between source requests.*600 shared queue limit.*60 records per batch, 3-second pause/);
+    assert.match(h.get('speedEffective').textContent, /Prompt readers: 17 concurrent.*up to 8 Civitai starts per 0.65s, 8 active maximum.*600 shared queue limit.*60 records per batch, 3-second pause/);
   }
 });
 

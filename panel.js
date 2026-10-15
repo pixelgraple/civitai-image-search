@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.14', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.16', ROOT_ID = '__iss_panel_root';
   if (window.__ISS_PANEL_VERSION === VERSION) { window.__ISS_TOGGLE_PANEL?.(); return; }
   window.__ISS_DISPOSE_PANEL?.();
   document.getElementById(ROOT_ID)?.remove();
@@ -51,7 +51,7 @@
       $('speedReset').disabled = !supported;
       $('speedStatus').textContent = error || (pending || requested !== null ? `Applying ${label(target)} across all tabs…` : !supported ? 'Checking collection speed…' : changed ? `Applied ${label(applied)} across all tabs.` : `${label(applied)} active across all tabs. Changes apply automatically.`);
       $('speedStatus').classList.toggle('error', Boolean(error));
-      $('speedEffective').textContent = profile ? `Prompt readers: ${profile.metadataConcurrency} concurrent · ${(profile.sourceIntervalMs / 1000).toLocaleString()}s between source requests · ${profile.outstandingLimit} shared queue limit. Record uploads: up to ${profile.uploadBatchSize} records per batch, ${(profile.uploadIntervalMs / 1000).toLocaleString()}-second pause. Smaller batches are sent when fewer records are ready.` : 'Reading effective collection limits…';
+      $('speedEffective').textContent = profile ? `Prompt readers: ${profile.metadataConcurrency} concurrent · up to 8 Civitai starts per ${(profile.sourceIntervalMs / 1000).toLocaleString()}s, 8 active maximum · ${profile.outstandingLimit} shared queue limit. Record uploads: up to ${profile.uploadBatchSize} records per batch, ${(profile.uploadIntervalMs / 1000).toLocaleString()}-second pause. Smaller batches are sent when fewer records are ready.` : 'Reading effective collection limits…';
     }
     async function apply() {
       if (disposed || pending || requested === null) return;
@@ -115,7 +115,8 @@
     const sourceActive = Number(source?.activeCount ?? (source?.active ? 1 : 0)), sourceQueued = Number(source?.queued || 0);
     const catalogWait = Math.max(0, Math.ceil((Number(browse?.catalog?.retryAt || 0) - Date.now()) / 1000));
     const sourceWait = Math.max(0, Math.ceil((Number(source?.blockedUntil || 0) - Date.now()) / 1000));
-    $('sourceStatus').textContent = `Civitai: ${sourceActive} / ${Number(source?.maxActive || 2)} requests active · ${sourceQueued} waiting for a source turn.` +
+    $('sourceStatus').textContent = `Civitai: ${sourceActive} / ${Number(source?.maxActive || 8)} requests active · ${sourceQueued} waiting for a source turn.` +
+        ` ${count(source?.completedLastMinute)} successful requests in the last minute · peak ${count(source?.peakActiveCount)} active this session.` +
       (sourceWait ? ` Civitai cooldown: ${sourceWait}s.` : source?.pauseReason ? ` ${source.pauseReason}` : '') +
       (browse?.catalog?.lastError ? ` Server: ${browse.catalog.lastError}${catalogWait ? ` Retry in ${catalogWait}s.` : ' Retrying when queued work is ready.'}` :
         remaining && !sourceWait ? ` Collection retry in ${remaining}s.` : '');

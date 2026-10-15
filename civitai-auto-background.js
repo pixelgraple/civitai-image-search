@@ -35,19 +35,21 @@ globalThis.ISSBrowseCollector = (() => {
     let busy = false, generation = 0, retryAt = 0, nextPulseAt = 0;
     const tabEpochs = new Map(), inFlight = new Set(), submitting = new Set(), drainingManual = new Set();
     const retiredOwners = new Map(), duplicateChecks = new WeakMap();
-    let persistChain = Promise.resolve();
-    const persist = () => {
-      deps.changed?.();
-      const snapshot = JSON.parse(JSON.stringify(saved));
-      const retired = [...retiredOwners.values()].filter(owner => !snapshot.pending.some(entry => entry.card.id === owner.id && entry.tabId === owner.tabId));
-      const next = persistChain.catch(() => {}).then(async () => {
-        await deps.save(STORAGE_KEY, snapshot);
-        if (persistChain === next) for (const owner of retired) if (!saved.pending.some(entry => entry.card.id === owner.id && entry.tabId === owner.tabId)) {
+    const checkpoint = ISSStateCheckpoint.create({
+      capture: () => {
+        const value = structuredClone(saved);
+        const owned = new Set(value.pending.map(entry => `${entry.tabId}:${entry.card.id}`));
+        const retired = [...retiredOwners.values()].filter(owner => !owned.has(`${owner.tabId}:${owner.id}`));
+        return { value, retired };
+      },
+      write: snapshot => deps.save(STORAGE_KEY, snapshot.value),
+      committed: (snapshot, latest) => {
+        if (latest) for (const owner of snapshot.retired) if (!saved.pending.some(entry => entry.card.id === owner.id && entry.tabId === owner.tabId)) {
           deps.release?.(owner.id, owner.tabId); retiredOwners.delete(`${owner.tabId}:${owner.id}`);
         }
-      });
-      persistChain = next; return next;
-    };
+      }
+    });
+    const persist = () => { deps.changed?.(); return checkpoint.request(); };
     const tabEpoch = id => tabEpochs.get(id) || 0;
     const invalidateTab = id => tabEpochs.set(id, tabEpoch(id) + 1);
     const paused = id => Number.isInteger(id) && saved.pausedTabs.includes(id);
