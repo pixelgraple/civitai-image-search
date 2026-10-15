@@ -1,7 +1,7 @@
-// Collect and advance only image galleries chosen by the person. No focus changes.
+// Observe visible cards passively; scroll only the exact gallery with an active scan.
 (() => {
   'use strict';
-  const VERSION = '2.8.17';
+  const VERSION = '2.8.18';
   if (location.protocol !== 'https:' || !['civitai.com', 'civitai.red'].includes(location.hostname)) return;
   if (window.__ISS_BROWSE_OBSERVER?.version === VERSION) return;
   window.__ISS_BROWSE_OBSERVER?.dispose?.();
@@ -160,6 +160,8 @@
   function resetPage() {
     if (lastUrl === location.href) return;
     lastUrl = location.href; walker = null; lastManualScrollKey = null; observed.clear(); intersection.disconnect(); epoch++;
+    status = { ...status, scrollAllowed: false, scrollPageUrl: '' };
+    statusEpoch++;
   }
   const intersection = new IntersectionObserver(() => schedule(), { rootMargin: '0px', threshold: 0.01 });
   const mutation = new MutationObserver(() => schedule());
@@ -214,7 +216,7 @@
   function enabled() { return !disposed && ((status.enabled ?? status.active) || status.manualPaused) && !status.tabPaused && !status.suspended; }
   function paused() { return status.sourcePaused || Date.now() < Math.max(retryAt, Number(status.retryAt) || 0) || Number(status.pipeline?.outstandingTotal ?? status.outstandingTotal ?? status.pendingTotal) >= MAX_OUTSTANDING; }
   function scrollGallery() {
-    if (!enabled() || paused() || !status.scrollAllowed || walker || imageId(location.href) || !routeAllowed() || Date.now() - lastScrollAt < STEP_DELAY / speed()) return false;
+    if (!enabled() || paused() || !status.scrollAllowed || status.scrollPageUrl !== location.href || walker || imageId(location.href) || !routeAllowed() || Date.now() - lastScrollAt < STEP_DELAY / speed()) return false;
     const manualKey = status.manualPaused ? Math.floor((Number(status.manualProgress?.processed) || 0) / METADATA_BATCH) : null;
     if (status.manualPaused && manualKey === lastManualScrollKey) return false;
     const image = [...observed.values()].find(onscreen); if (!image) return false;
@@ -229,9 +231,11 @@
   }
   function applyStatus(next) {
     if (!next || disposed) return;
+    resetPage();
     const priorSpeed = speed();
     statusEpoch++;
     status = { ...status, ...next, ...(next.ok === false ? { enabled: false, active: false, scrollAllowed: false } : {}) };
+    if (!status.scrollPageUrl || status.scrollPageUrl !== location.href) status.scrollAllowed = false;
     if (enabled()) {
       mutation.observe(document.documentElement, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['href', 'src', 'srcset', 'aria-label', 'title'] });
       if (priorSpeed !== speed()) { clearTimeout(timer); timer = null; schedule(0); }
@@ -275,7 +279,7 @@
   async function refresh() {
     const beforeStatus = statusEpoch;
     try { const next = await send({ type: 'civitai-auto-status' }); if (beforeStatus !== statusEpoch) return; applyStatus(next); if (enabled()) schedule(100); }
-    catch { if (beforeStatus === statusEpoch) applyStatus({ enabled: false, active: false }); }
+    catch { if (beforeStatus === statusEpoch) applyStatus({ enabled: false, active: false, scrollAllowed: false, scrollPageUrl: '' }); }
   }
   function runtimeMessage(message) {
     if (message?.type === 'civitai-auto-refresh') refresh();

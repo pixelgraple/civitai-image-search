@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const source = fs.readFileSync(new URL('../civitai-browse.js', import.meta.url), 'utf8');
 function harness(initialUrl = 'https://civitai.red/images') {
   let now = 100000, timerId = 0, statusCalls = 0, customResponse;
-  const status = { ok: true, enabled: true, active: true, scrollAllowed: true, pending: 0, pendingTotal: 0, tabPaused: false, sourcePaused: false, retryAt: 0 };
+  const status = { ok: true, enabled: true, active: true, scrollAllowed: true, scrollPageUrl: initialUrl, pending: 0, pendingTotal: 0, tabPaused: false, sourcePaused: false, retryAt: 0 };
   const location = new URL(initialUrl), cards = [], images = [], messages = [], scrolls = [], order = [], timers = new Map(), intervals = new Map(), events = {}, listeners = new Set(), observers = [];
   const node = (tagName = 'DIV', parent = null) => { const value = { tagName, parentElement: parent, children: [], isConnected: true, scrollTop: 0, clientHeight: 0, scrollHeight: 0, overflowY: 'visible' }; parent?.children.push(value); return value; };
   const root = node('HTML'); root.clientHeight = 800; root.scrollHeight = 10000;
@@ -46,13 +46,13 @@ function harness(initialUrl = 'https://civitai.red/images') {
     mutate: () => mutation?.fn(), statusCalls: () => statusCalls, respond: fn => { customResponse = fn; }, advance: ms => { now += ms; }, document };
 }
 
-test('collects visible sibling images before scrolling; excludes offscreen and foreign media', async () => {
+test('selected gallery collects visible sibling images before scrolling; excludes offscreen and foreign media', async () => {
   const h = harness(); const card = h.addCard(55, { siblingImage: true }); h.addCard(56, { visible: false }); h.addCard(57, { src: 'https://foreign.example/57.jpg' });
   await h.start(); await h.tick(); assert.deepEqual(h.messages[0].cards.map(item => item.id), ['55']);
   assert.equal(h.observers[0].targets.has(card.image), true); assert.deepEqual(h.order, ['collect', 'scroll']); assert.equal(h.scrolls[0].top, 576);
   await h.tick(); assert.equal(h.messages.length, 2); assert.deepEqual(h.messages[1].cards.map(item => item.id), ['56']);
 });
-test('inactive tabs process background pulses and scroll without a local timer or focus', async () => {
+test('selected inactive tabs process background pulses and scroll without a local timer or focus', async () => {
   const h = harness(); h.document.visibilityState = 'hidden'; h.addCard(55); await h.start(); await h.pulse();
   assert.equal(h.messages.length, 1); assert.equal(h.scrolls.length, 1); assert.equal(h.statusCalls(), 1);
   assert.doesNotMatch(source, /\.focus\(|window\.open\(|visibilityState\s*[!=]==?\s*['"]visible/);
@@ -118,7 +118,7 @@ test('model upload wizard steps never collect or scroll, while an ordinary wizar
 test('SPA route changes reset discovery while protected routes remain untouched', async () => {
   const h = harness('https://civitai.red/models/create'); h.addCard(55); await h.start(); await h.pulse();
   h.location.pathname = '/models/2970908/krea2-sickrealism'; await h.pulse(); assert.equal(h.messages[0].pageUrl, 'https://civitai.red/models/2970908/krea2-sickrealism');
-  h.location.pathname = '/models/create'; h.addCard(66); h.advance(3000); await h.pulse(); assert.equal(h.messages.length, 1); assert.equal(h.scrolls.length, 1);
+  h.location.pathname = '/models/create'; h.addCard(66); h.advance(3000); await h.pulse(); assert.equal(h.messages.length, 1); assert.equal(h.scrolls.length, 0);
 });
 test('same-version injection is idempotent and a previous observer is disposed on replacement', async () => {
   const h = harness(); h.addCard(55); await h.start(); await h.start(); assert.equal(h.statusCalls(), 1); assert.equal(h.listeners.size, 1);
@@ -127,7 +127,7 @@ test('same-version injection is idempotent and a previous observer is disposed o
   h.context.window.__ISS_BROWSE_OBSERVER.dispose(); await h.pulse(); assert.equal(h.messages.length, 1); assert.equal(h.listeners.size, 0); assert.equal(h.timers.size, 0);
 });
 test('legacy boolean guard no longer prevents updated observer installation', async () => {
-  const h = harness(); h.context.window.__ISS_BROWSE_OBSERVER = true; await h.start(); assert.equal(h.context.window.__ISS_BROWSE_OBSERVER.version, '2.8.17');
+  const h = harness(); h.context.window.__ISS_BROWSE_OBSERVER = true; await h.start(); assert.equal(h.context.window.__ISS_BROWSE_OBSERVER.version, '2.8.18');
   const rejected = harness('https://civitai.red.evil.example/'); await rejected.start(); assert.equal(rejected.statusCalls(), 0);
 });
 test('navigation during card submission never scrolls the new page using stale work', async () => {

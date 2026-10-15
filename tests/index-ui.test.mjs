@@ -32,8 +32,8 @@ function transportHarness({ connectFails = false } = {}) {
 }
 const speedProfile = multiplier => ({ multiplier, sourceConcurrency: 1, sourceStartLimit: 1, metadataConcurrency: Math.round(12 * multiplier), uploadBatchSize: 60, uploadIntervalMs: 3000, sourceIntervalMs: Math.round(1000 / multiplier), outstandingLimit: 600 });
 const speedConfig = multiplier => ({ sourceConcurrency: 1, speedMultiplier: multiplier, collectionSpeed: speedProfile(multiplier) });
-const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.17', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
-function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.17', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.18', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
+function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.18', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], requests = [], intervals = [], intervalDelays = [];
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -58,7 +58,7 @@ function libraryHarness({ config = {}, failSave = false, failFetch = false, scan
   } });
   return { get, cloud, messages, requests, intervals, intervalDelays, transport };
 }
-function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.17', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.18', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], events = {};
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -79,7 +79,7 @@ function panelHarness({ configured = true, config = {}, state = { status: {}, fe
 test('fresh installation is ready without credentials and pins requests to shared HTTPS endpoint', async () => {
   const h = libraryHarness({ config: { apiBase: 'https://untrusted.example/api.php' } }); await flush();
   assert.equal(h.get('autoBrowse').checked, true); assert.equal(h.get('browseState').textContent, 'On');
-  assert.match(h.get('browseStatus').textContent, /Automatic scrolling.*inactive tabs/);
+  assert.match(h.get('browseStatus').textContent, /Only galleries started with Scan this tab scroll automatically.*inactive tabs/);
   assert.ok(h.requests.every(request => request.url.startsWith('https://search-civitai.xyz/api.php?action=')));
   assert.equal(h.requests.length, 1); assert.ok(h.requests[0].url.endsWith('health'));
   assert.equal(h.requests[0].options.redirect, 'error'); assert.equal(h.requests[0].options.credentials, 'omit');
@@ -121,7 +121,7 @@ test('activity refresh preserves an unsaved browsing preference', async () => {
 
 test('Civitai panel starts immediately even with old unconfigured state and never requests credentials', async () => {
   const h = panelHarness({ configured: false }); await flush(); await h.get('start').dispatch('click');
-  assert.equal(h.messages.some(message => message.type === 'start'), true); assert.equal(h.get('runState').textContent, 'Automatic scrolling & collection');
+  assert.equal(h.messages.some(message => message.type === 'start'), true); assert.equal(h.get('runState').textContent, 'Collecting visible images');
   await h.get('settings').dispatch('click'); assert.equal(h.messages.at(-1).type, 'openPromptLibrary');
   assert.equal(h.messages.some(message => Object.hasOwn(message, 'writeToken')), false);
   assert.equal(h.messages.some(message => message.type === 'getConfig'), true, 'Read the background-version handshake');
@@ -171,7 +171,7 @@ test('feed activity stays visible when automatic browsing is disabled', async ()
 test('panel resume follows authoritative resumability and browsing pause is scoped to this tab', async () => {
   const h = panelHarness({ state: { canResume: false, status: { stopped: true }, feed: null }, browse: { manualPaused: false } }); await flush();
   assert.equal(h.get('resume').hidden, true); assert.doesNotMatch(h.get('browse').textContent, /feed scan active/);
-  const active = panelHarness({ state: { canResume: false, status: { running: true, catalogSynced: 4 }, feed: { pages: 2 } }, browse: { manualPaused: true } }); await flush();
+  const active = panelHarness({ state: { canResume: false, status: { running: true, catalogSynced: 4 }, feed: { pages: 2 } }, browse: { manualPaused: true, scrollPageUrl: 'https://civitai.red/models/42' } }); await flush();
   assert.equal(active.get('stop').disabled, false); assert.match(active.get('browse').textContent, /feed scan active on this tab/);
 });
 
@@ -239,7 +239,7 @@ test('manual Start cannot bootstrap another site request during a shared cooldow
 test('activity offers one action to stop all collection',async()=>{
   const h=libraryHarness(); await flush(); await h.get('pauseAll').dispatch('click');
   assert.equal(h.messages.filter(message=>message.type==='pauseAll').length,1);
-  assert.match(h.get('settingsMessage').textContent,/All collection stopped/);
+  assert.match(h.get('collectionMessage').textContent,/All collection stopped/);
   assert.equal(h.get('autoBrowse').checked,false); assert.equal(h.get('pauseAll').disabled,false);
 });
 
@@ -247,7 +247,7 @@ test('automatic-only panel shows its eight submitted images and twelve queued in
   const h = panelHarness({ browse: { active: true, synced: 8, pending: 12, pendingTotal: 24, processed: 10, alreadyStored: 1, skippedPromptless: 2, phase: 'reading image metadata', lastActivityAt: Date.now() - 4000, scrollAllowed: true } }); await flush();
   assert.equal(h.get('synced').textContent, '8'); assert.equal(h.get('stored').textContent, '1'); assert.equal(h.get('promptless').textContent, '2');
   assert.match(h.get('activity').textContent, /10 processed.*12 queued on this tab.*reading image metadata.*last activity/);
-  assert.match(h.get('browse').textContent, /Automatic scrolling: on.*24 queued across tabs/);
+  assert.match(h.get('browse').textContent, /Visible-image collection: on.*scrolling stays manual.*24 queued across tabs/);
   assert.match(h.get('speedEffective').textContent, /Prompt readers: 12 concurrent.*60 records per batch, 3-second pause/); assert.equal(h.get('stop').disabled, false);
 });
 
@@ -276,7 +276,7 @@ test('settings distinguish sixty-record uploads from twelve concurrent prompt re
   assert.equal(h.get('pendingCount').textContent, '31'); assert.match(h.get('activityDetails').textContent, /19 processed.*submitting prompts.*last activity/);
   assert.match(h.get('speedEffective').textContent, /Prompt readers: 12 concurrent.*60 records per batch, 3-second pause/);
   const html = fs.readFileSync(new URL('../library.html', import.meta.url), 'utf8');
-  assert.match(html, /Automatically scroll and collect/); assert.match(html, /Inactive tabs work too/); assert.doesNotMatch(html, /does not scroll/);
+  assert.match(html, /Collect images as you browse/); assert.match(html, /Inactive scan tabs work too/); assert.doesNotMatch(html, /does not scroll/);
 });
 
 test('Escape on the Civitai viewer never stops automatic collection outside the panel', async () => {
@@ -388,10 +388,12 @@ test('authoritative pipeline stages update live and are not confused with server
 
 test('panel shows scoped pipeline stages with the authoritative global capacity', async () => {
   const h = panelHarness(); await flush();
-  h.transport.ports[0].emit(pushed({ state: { status: {}, pipeline: { discovered: 90, waitingMetadata: 10, readingPrompts: 12, readyUpload: 20, uploading: 0, accepted: 48, alreadyStored: 3, outstandingTotal: 600, outstandingLimit: 600 } } }));
+  h.transport.ports[0].emit(pushed({ state: { status: {}, pipeline: { discovered: 90, waitingMetadata: 10, readingPrompts: 12, readyUpload: 20, uploading: 0, accepted: 48, alreadyStored: 3, outstandingTotal: 600, outstandingLimit: 600,
+    globalStages: { waitingDuplicateCheck: 150, checkingDuplicates: 20, waitingMetadata: 300, readingPrompts: 30, readyUpload: 80, uploading: 20 }, paused: 400 } } }));
   assert.equal(h.get('synced').textContent, '48'); assert.equal(h.get('stored').textContent, '3');
   assert.match(h.get('pipelineStats').textContent, /90 discovered · 0 waiting for duplicate check · 0 checking duplicates · 10 waiting to read prompts · 12 reading prompts · 20 records ready to send · 0 records being sent/);
   assert.match(h.get('queueStatus').textContent, /600 \/ 600 outstanding across all tabs.*scrolling paused/);
+  assert.match(h.get('sharedQueueStatus').textContent, /Shared queue: 500 preparing.*80 ready to send.*20 sending.*400 paused \(included in these counts\)/);
 });
 
 test('server image counts refresh every ten seconds independently of live source events', async () => {
@@ -531,10 +533,12 @@ test('old background workers cannot receive speed changes and disposal cancels a
 
 test('duplicate checks, prompt readers and active record submissions remain separate live stages', async () => {
   const pipeline = { discovered: 1200, waitingDuplicateCheck: 270, checkingDuplicates: 120, waitingMetadata: 120, readingPrompts: 12, readyUpload: 18, uploading: 60, accepted: 600, alreadyStored: 40, outstandingTotal: 600, outstandingLimit: 600 };
+  pipeline.globalStages = { waitingDuplicateCheck: 270, checkingDuplicates: 120, waitingMetadata: 120, readingPrompts: 12, readyUpload: 18, uploading: 60 };
   const h = libraryHarness(); await flush();
   h.transport.ports[0].emit(pushed({ state: { status: {}, pipeline } }));
   for (const [id, value] of [['waitingDuplicateCheckCount', '270'], ['checkingDuplicatesCount', '120'], ['waitingMetadataCount', '120'], ['readingPromptsCount', '12'], ['readyUploadCount', '18'], ['uploadingCount', '60']]) assert.equal(h.get(id).textContent, value);
   assert.match(h.get('queueBreakdown').textContent, /270 waiting for duplicate check · 120 checking duplicates · 120 waiting to read prompts · 12 reading prompts · 18 records ready to send · 60 records being sent/);
+  assert.match(h.get('sharedQueueStatus').textContent, /Shared queue: 522 preparing.*18 ready to send.*60 sending.*0 paused \(included in these counts\)/);
   const p = panelHarness(); await flush(); p.transport.ports[0].emit(pushed({ state: { status: {}, pipeline } }));
   assert.match(p.get('pipelineStats').textContent, /270 waiting for duplicate check · 120 checking duplicates.*12 reading prompts.*60 records being sent/);
   h.transport.ports[0].emit(pushed({ state: { status: {}, pipeline: { ...pipeline, checkingDuplicates: 0, readyUpload: 78, uploading: 0 } } }));

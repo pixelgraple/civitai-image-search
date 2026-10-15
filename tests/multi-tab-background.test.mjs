@@ -157,11 +157,19 @@ test('record-upload rate limiting retains prepared records after durable cursor 
 test('browser restart restores matching source tabs and parks replaced tab IDs safely',async()=>{
   const h=await harness(config); addTab(h,8,101); install(h); await start(h,7);await start(h,8);await h.run('driverPulse()');
   const saved=structuredClone(h.storage);
+  const orphan=saved[key].runs.find(run=>run.sessionTabId===7);
+  orphan.catalogSyncedIds=[];orphan.preparedRecords={'99':page(99).catalogItems[0]};
+  orphan.outstandingIds=['99','199','299'];orphan.feed.cursor='unfinished-page-99';
   const restored=await harness(saved,{tabs:[{id:7,url:'https://civitai.red/models/500'},{id:8,url:'https://civitai.red/models/101'},{id:40,url:'https://civitai.red/models/99'}]});install(restored);
   assert.equal(state(restored,7).status.running,false);assert.equal(state(restored,8).status.running,true);
+  const parked=restored.storage[key].runs.find(run=>run.sessionTabId===7);
+  assert.deepEqual(parked.outstandingIds,['99']);assert.equal(parked.preparedRecords['99'].prompt,'safe landscape fixture');
+  assert.equal(restored.run('outstandingImages.has("199") || outstandingImages.has("299")'),false);
+  assert.equal(restored.run('outstandingImages.get("99").owners.has("manual:7")'),true);
   assert.equal((await restored.message({type:'getState'},sender(restored,40))).canResume,true);
   assert.equal((await start(restored,40,'resume')).ok,true);
-  assert.equal(state(restored,40).feed.cursor,'next-99');assert.equal(state(restored,8).feed.cursor,'next-101');
+  assert.equal(state(restored,40).feed.cursor,'unfinished-page-99');assert.equal(state(restored,8).feed.cursor,'next-101');
+  assert.equal(restored.run('sessions.get(40).preparedRecords["99"].prompt'),'safe landscape fixture');
   assert.equal(restored.run('sessions.has(7)'),false);
 });
 
@@ -190,10 +198,22 @@ test('Stop cancels a pending Start for only the calling tab',async()=>{
 
 test('page navigation and closed tabs leave other source scans running',async()=>{
   const h=await harness(config);install(h);addTab(h,8);await start(h,7);await start(h,8);
+  h.context.preparedSeven=page(7001).catalogItems[0];h.context.preparedEight=page(8001).catalogItems[0];
+  h.run(`for (const [tabId,prepared,unread,record] of [[7,'7001','7002',preparedSeven],[8,'8001','8002',preparedEight]]) {
+    const run=sessions.get(tabId);run.outstandingIds=[prepared,unread];run.preparedRecords[prepared]=record;
+    reserveOutstanding(prepared,'manual',tabId,'readyUpload');reserveOutstanding(unread,'manual',tabId,'waitingMetadata');
+  }`);
+  await h.run('persistState()');
   h.tabs.get(7).url='https://civitai.red/models/500';
   await h.emit('tabUpdated',7,{url:h.tabs.get(7).url},h.tabs.get(7));
   assert.equal(state(h,7).status.running,false);assert.equal(state(h,8).status.running,true);
+  assert.deepEqual(h.storage[key].runs.find(run=>run.sessionTabId===7).outstandingIds,['7001']);
+  assert.equal(h.run('outstandingImages.has("7002")'),false);assert.equal(h.run('outstandingImages.has("8002")'),true);
   h.tabs.delete(8);await h.emit('tabRemoved',8);assert.equal(aggregate(h).activeTabs,0);
+  assert.deepEqual(h.storage[key].runs.find(run=>run.sessionTabId===8).outstandingIds,['8001']);
+  assert.equal(h.run('outstandingImages.has("8002")'),false);
+  assert.equal(h.run('sessions.get(7).preparedRecords["7001"].prompt'),'safe landscape fixture');
+  assert.equal(h.run('sessions.get(8).preparedRecords["8001"].prompt'),'safe landscape fixture');
 });
 
 test('turning passive browsing off preserves manual tabs and obsolete download commands remain rejected',async()=>{
@@ -231,7 +251,7 @@ test('a paused tab navigation makes recovery available until that source page re
   assert.equal((await h.message({type:'getState'},sender(h,8))).canResume,false);
 });
 
-test('offscreen heartbeat acknowledges without awaiting a slow feed and keeps another tab scrolling', async () => {
+test('offscreen heartbeat acknowledges a slow feed while other tabs observe without scrolling', async () => {
   const h = await harness(); addTab(h, 8); install(h);
   let release, entered; const started = new Promise(resolve => { entered = resolve; });
   h.context.nextFeed = () => new Promise(resolve => { entered(); release = resolve; });
@@ -243,7 +263,7 @@ test('offscreen heartbeat acknowledges without awaiting a slow feed and keeps an
   const response = await h.message({ type: 'driverPulse' }, { url: 'chrome-extension://test-extension/offscreen.html' });
   assert.equal(response.ok, true); await started;
   await h.run('clockTasks.get("scroll")');
-  assert.equal(pulses.some(pulse => pulse.tabId === 8 && pulse.status.scrollAllowed), true);
+  assert.equal(pulses.some(pulse => pulse.tabId === 8 && pulse.status.scrollAllowed), false);
   assert.equal(pulses.some(pulse => pulse.tabId === 7 && pulse.status.manualPaused), true);
   const before = pulses.filter(pulse => pulse.tabId === 8).length;
   h.run('nextAutoTabPulseAt = 0'); await h.message({ type: 'driverPulse' }, { url: 'chrome-extension://test-extension/offscreen.html' });
@@ -264,15 +284,15 @@ test('enabled automatic tabs keep an offscreen clock without a manual scan; disa
   assert.equal(exists, false); assert.equal(closes, 1);
 });
 
-test('Stop tab pauses automatic collection and scrolling until that tab is deliberately resumed', async () => {
+test('Stop tab pauses automatic collection; passive resume does not authorize scrolling', async () => {
   const h = await harness(); addTab(h, 8); install(h);
   assert.equal((await h.message({ type: 'stop' }, sender(h, 7))).ok, true);
   let stopped = await h.message({ type: 'civitai-auto-status' }, sender(h, 7));
   assert.equal(stopped.tabPaused, true); assert.equal(stopped.scrollAllowed, false);
-  assert.equal((await h.message({ type: 'civitai-auto-status' }, sender(h, 8))).scrollAllowed, true);
+  assert.equal((await h.message({ type: 'civitai-auto-status' }, sender(h, 8))).scrollAllowed, false);
   assert.equal((await h.message({ type: 'civitai-auto-resume-tab' }, sender(h, 7))).ok, true);
   stopped = await h.message({ type: 'civitai-auto-status' }, sender(h, 7));
-  assert.equal(stopped.tabPaused, false); assert.equal(stopped.scrollAllowed, true);
+  assert.equal(stopped.tabPaused, false); assert.equal(stopped.scrollAllowed, false);
   await h.message({ type: 'stop' }, sender(h, 8)); await start(h, 7);
   assert.equal((await h.message({ type: 'civitai-auto-status' }, sender(h, 8))).tabPaused, true);
 });
@@ -328,7 +348,7 @@ test('manual metadata progress appears before server submission and stays scoped
   assert.equal(state(h, 7).status.submitted, 1); assert.equal(state(h, 7).status.pending, 0);assert.equal(state(h,7).status.processed,12);
 });
 
-test('a large old passive backlog on a manual tab cannot freeze its scroll or another tab', async () => {
+test('a large passive backlog cannot freeze its selected scan or authorize another tab to scroll', async () => {
   const pending = Array.from({ length: 151 }, (_, index) => ({ tabId: 7, pageUrl: 'https://civitai.red/models/99',
     card: { id: String(index + 1), previewUrl: `https://image.civitai.com/key/test/width=450/${index + 1}.jpg` } }));
   const original = await harness(); install(original); await start(original, 7);
@@ -339,7 +359,7 @@ test('a large old passive backlog on a manual tab cannot freeze its scroll or an
   const first = await h.message({ type: 'civitai-auto-status' }, sender(h, 7));
   const other = await h.message({ type: 'civitai-auto-status' }, sender(h, 8));
   assert.equal(first.pending, 151); assert.equal(first.manualPaused, true); assert.equal(first.scrollAllowed, true);
-  assert.equal(other.pendingTotal, 151); assert.equal(other.pendingRunnableTotal, 0); assert.equal(other.scrollAllowed, true);
+  assert.equal(other.pendingTotal, 151); assert.equal(other.pendingRunnableTotal, 0); assert.equal(other.scrollAllowed, false);
   await h.run('backgroundFeedPulse(7)');
   await submissions(h);
   assert.equal((await h.message({ type: 'civitai-auto-status' }, sender(h, 7))).pending, 150);

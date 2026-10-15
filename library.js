@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.17', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.18', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
   let settingsOpen = false, saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
   let latest = null, revision = 0, statusPort = null, portReady = false, reconnectTimer = null, handshakeTimer = null, reconnectAttempts = 0, disposed = false;
@@ -98,12 +98,15 @@
       for (const [id, field] of [['discoveredCount', 'discovered'], ['waitingDuplicateCheckCount', 'waitingDuplicateCheck'], ['checkingDuplicatesCount', 'checkingDuplicates'], ['waitingMetadataCount', 'waitingMetadata'], ['readingPromptsCount', 'readingPrompts'], ['readyUploadCount', 'readyUpload'], ['uploadingCount', 'uploading']]) $(id).textContent = pipeline ? count(pipeline[field]) : '—';
       const passivePending = amount(status?.pendingTotal ?? status?.pending), manualPending = amount(scans?.status?.pending);
       $('pendingCount').textContent = pipeline ? `${count(pipeline.outstandingTotal)} / ${count(pipeline.outstandingLimit || 600)}` : count(passivePending + manualPending);
-      $('queueBreakdown').textContent = pipeline ? `${count(pipeline.waitingDuplicateCheck)} waiting for duplicate check · ${count(pipeline.checkingDuplicates)} checking duplicates · ${count(pipeline.waitingMetadata)} waiting to read prompts · ${count(pipeline.readingPrompts)} reading prompts · ${count(pipeline.readyUpload)} records ready to send · ${count(pipeline.uploading)} records being sent. ${amount(pipeline.outstandingTotal) >= 600 ? `All gallery scrolling is paused until space is free.${amount(pipeline.paused) > 0 ? ` ${count(pipeline.paused)} images are queued on paused tabs. Resume a paused tab to drain its queue.` : ''}` : 'The 600-image limit is shared across every tab.'}` : `${count(passivePending)} automatic · ${count(manualPending)} feed images waiting or in progress`;
+      const shared = pipeline?.globalStages;
+      $('sharedQueueStatus').hidden = !shared;
+      $('sharedQueueStatus').textContent = shared ? `Shared queue: ${count(amount(shared.waitingDuplicateCheck) + amount(shared.checkingDuplicates) + amount(shared.waitingMetadata) + amount(shared.readingPrompts))} preparing (checks/prompts) · ${count(shared.readyUpload)} ready to send · ${count(shared.uploading)} sending. ${count(pipeline.paused)} paused (included in these counts).` : '';
+      $('queueBreakdown').textContent = pipeline ? `${count(pipeline.waitingDuplicateCheck)} waiting for duplicate check · ${count(pipeline.checkingDuplicates)} checking duplicates · ${count(pipeline.waitingMetadata)} waiting to read prompts · ${count(pipeline.readingPrompts)} reading prompts · ${count(pipeline.readyUpload)} records ready to send · ${count(pipeline.uploading)} records being sent. ${amount(pipeline.outstandingTotal) >= 600 ? `Selected gallery scrolling is paused until space is free.${amount(pipeline.paused) > 0 ? ` ${count(pipeline.paused)} images are queued on paused tabs. Resume a paused tab to drain its queue.` : ''}` : 'The 600-image limit is shared across every tab.'}` : `${count(passivePending)} automatic · ${count(manualPending)} feed images waiting or in progress`;
       const activeTabs = amount(scans?.activeTabs);
       $('activeTabCount').textContent = count(activeTabs);
       $('browseState').textContent = !compatible ? 'Reload extension' : activeTabs ? 'Feeds active' : status.suspended ? 'Collection paused' : status.enabled ? 'On' : 'Off';
       const scanStatus = activeTabs ? `${count(activeTabs)} feed ${activeTabs === 1 ? 'tab is' : 'tabs are'} scanning. ` : '';
-      $('browseStatus').textContent = scanStatus + (status.suspended ? `Automatic collection paused: ${status.lastError || 'Collection is temporarily unavailable.'}` : status.enabled ? `Automatic scrolling and collection run in open Civitai galleries, including inactive tabs.${status.lastError ? ` Retrying: ${status.lastError}` : ''}` : 'Automatic browsing collection is off. Start a feed scan from a Civitai tab’s panel.');
+      $('browseStatus').textContent = scanStatus + (status.suspended ? `Automatic collection paused: ${status.lastError || 'Collection is temporarily unavailable.'}` : status.enabled ? `Visible images are collected as you browse. Only galleries started with Scan this tab scroll automatically, including inactive tabs.${status.lastError ? ` Retrying: ${status.lastError}` : ''}` : 'Automatic browsing collection is off. Start a feed scan from a Civitai tab’s panel.');
       const remaining = Math.max(0, Math.ceil((Math.max(source?.blockedUntil || 0, status?.retryAt || 0) - Date.now()) / 1000));
       const sourceActive = Number(source?.activeCount ?? (source?.active ? 1 : 0)), sourceQueued = Number(source?.queued || 0);
       const catalogWait = Math.max(0, Math.ceil((Number(status?.catalog?.retryAt || 0) - Date.now()) / 1000));
@@ -196,7 +199,7 @@
       if (!result?.ok) throw new Error(result?.error || 'Could not save browsing preference.');
       preferenceDirty = false; renderedPreference = autoBrowse;
       await refreshStatus();
-      message(autoBrowse ? 'Saved. Automatic scrolling and collection are on. Keep your chosen Civitai galleries open.' : 'Saved. Automatic browsing collection is off. Your feed scans keep running.');
+      message(autoBrowse ? 'Saved. Visible-image collection is on. Start Scan this tab in each gallery you want to scroll automatically.' : 'Saved. Automatic browsing collection is off. Your feed scans keep running.');
     } catch (error) { message(error.message || 'Could not save browsing preference.', true); }
     finally { setBusy(false); }
   });

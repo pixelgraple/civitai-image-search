@@ -5,7 +5,7 @@ importScripts('state-checkpoint.js', 'collection-speed.js', 'download-settings.j
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.17', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.18', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -178,6 +178,14 @@ function releaseManualImage(run, id) {
   id = String(id); run.outstandingIds = run.outstandingIds.filter(value => value !== id);
   // Capacity is released by persistState only after durable ownership removal.
 }
+function retainPreparedOrphanWork(run) {
+  if (!run.orphaned) return;
+  // An incomplete feed keeps its cursor until every record is durably prepared.
+  // Resume rereads that page, so unread IDs need not occupy live capacity while
+  // their source tab is gone. Keep every prepared prompt and its reserved slot.
+  run.outstandingIds = run.outstandingIds.filter(id => Object.hasOwn(run.preparedRecords, id));
+  // persistState releases retired ownership only after this change is saved.
+}
 function acceptManualRecords(run, batch, storageItems) {
   let group = manualAcceptanceBatches.get(run);
   if (!group) {
@@ -233,22 +241,26 @@ function pumpManualPrepared(run) {
   for (const record of Object.values(run.preparedRecords)) ensureManualSubmission(run, record).catch(() => {});
 }
 function pipelineSnapshot(tabId) {
-  const scoped = Number.isInteger(tabId), entries = [...outstandingImages.entries()].filter(([, entry]) =>
+  const scoped = Number.isInteger(tabId), allEntries = [...outstandingImages.entries()], entries = allEntries.filter(([, entry]) =>
     !scoped || [...entry.owners.values()].some(owner => owner.tabId === tabId));
   const stages = { waitingDuplicateCheck: 0, checkingDuplicates: 0, waitingMetadata: 0, readingPrompts: 0, readyUpload: 0, uploading: 0 };
-  for (const [id, entry] of entries) {
-    const owners = [...entry.owners.values()].filter(owner => !scoped || owner.tabId === tabId);
-    const stage = preparedUploads.get(id)?.uploading ? 'uploading'
+  // Global stages partition the shared outstanding total; scoped stages below
+  // describe this tab only. Paused is an overlapping subset, never extra work.
+  const globalStages = { ...stages };
+  const stageFor = (id, owners) => preparedUploads.get(id)?.uploading ? 'uploading'
       : preparedUploads.get(id)?.checking ? catalogChecks.state(id) === 'checking' ? 'checkingDuplicates' : 'waitingDuplicateCheck'
       : owners.some(owner => owner.stage === 'readyUpload') ? 'readyUpload'
       : owners.some(owner => owner.stage === 'readingPrompts') ? 'readingPrompts'
       : owners.some(owner => owner.stage === 'waitingDuplicateCheck' || owner.stage === 'checkingDuplicates')
         ? catalogChecks.state(id) === 'checking' ? 'checkingDuplicates' : 'waitingDuplicateCheck' : 'waitingMetadata';
-    stages[stage]++;
+  for (const [id, entry] of allEntries) globalStages[stageFor(id, [...entry.owners.values()])]++;
+  for (const [id, entry] of entries) {
+    const owners = [...entry.owners.values()].filter(owner => !scoped || owner.tabId === tabId);
+    stages[stageFor(id, owners)]++;
   }
   const runs = scoped ? [sessions.get(tabId)].filter(Boolean) : [...sessions.values()];
   const automatic = autoBrowseCollector?.stats(tabId) || {};
-  return { ...stages, outstanding: entries.length, outstandingTotal: outstandingImages.size, outstandingLimit: OUTSTANDING_LIMIT,
+  return { ...stages, globalStages, outstanding: entries.length, outstandingTotal: outstandingImages.size, outstandingLimit: OUTSTANDING_LIMIT,
     paused: [...outstandingImages.values()].filter(entry => [...entry.owners.values()].every(owner =>
       owner.kind === 'manual' ? !sessions.get(owner.tabId)?.status.running : autoBrowseCollector.isPaused(owner.tabId))).length,
     discovered: runs.reduce((sum, run) => sum + run.catalogDiscoveredIds.length, 0) + (automatic.discovered || 0),
@@ -342,6 +354,7 @@ async function restoreAll() {
     sessions.set(tabId, run); drivers.set(tabId, driver);
     const sourceTab = await getTab(tabId);
     run.orphaned = ISSBrowseCollector.page(sourceTab?.url)?.href !== pageUrl;
+    retainPreparedOrphanWork(run);
     if (prior.status?.running || prior.status?.scanning) {
       try {
         if (prior.settings?.serverCopies !== true) throw new Error('Previous local collection is paused. Resume to send this feed to the server.');
@@ -380,6 +393,7 @@ async function stopSession(tabId, reason = 'user', error = '') {
     if (driver) { driver.enabled = false; driver.phase = 'paused'; }
     run.status.running = run.status.scanning = false; run.status.stopped = true;
     if (['source-tab-closed','source-tab-changed'].includes(reason)) run.orphaned = true;
+    retainPreparedOrphanWork(run);
     run.status.stopReason = reason; if (error) run.status.lastError = error;
     run.status.phase = reason === 'feed-complete' ? 'selected feed complete' : 'paused';
     run.status.lastActivityAt = Date.now();
@@ -837,12 +851,15 @@ async function getBrowseStatus(tabId) {
   // Source state may wait for persistence during startup. Read the current tab
   // controls afterwards so a late pulse cannot revive a tab stopped meanwhile.
   const source = await getCivitaiSourceRequestState();
+  const tab = Number.isInteger(tabId) ? await getTab(tabId) : null;
   const status = await autoBrowseCollector.status(tabId);
   const run = Number.isInteger(tabId) ? sessions.get(tabId) : null;
   const sourcePaused = !!source.authStatus || source.blockedUntil > Date.now();
   const retryAt = Math.max(status.retryAt || 0, source.blockedUntil > Date.now() ? source.blockedUntil : 0,
     run?.feed?.retryAt > Date.now() ? run.feed.retryAt : 0, run?.uploadRetryAt > Date.now() ? run.uploadRetryAt : 0);
   const manualActive = !!run?.status.running;
+  const scrollPageUrl = manualActive && ISSBrowseCollector.page(tab?.url)?.href === run.settings.pageUrl
+    ? run.settings.pageUrl : '';
   const pipeline = pipelineSnapshot(tabId);
   return versionStatus({ ...status, collectionSpeed: ISSCollectionSpeed.get(), pipeline, outstandingTotal: pipeline.outstandingTotal, sourcePaused, sourceCooldownUntil: source.blockedUntil || 0,
     sourcePauseReason: source.pauseReason || '', retryAt,
@@ -852,9 +869,11 @@ async function getBrowseStatus(tabId) {
       : pipeline.outstandingTotal >= OUTSTANDING_LIMIT && pipeline.paused ? 'shared queue full; resume paused tabs'
       : status.manualPaused ? run.status.phase || 'selected feed collecting' : status.phase,
     lastActivityAt: Math.max(status.lastActivityAt || 0, run?.status.lastActivityAt || 0),
-    // Visual scroll and source metadata use separate clocks. A manual feed can
-    // keep its page moving while it owns metadata work for that one tab.
-    scrollAllowed: (status.active || manualActive) && !status.tabPaused && !sourcePaused && retryAt <= Date.now() &&
+    // Passive observation never grants permission to move the page. Only a
+    // running scan owns scrolling, and only on the exact page it was started on.
+    // The observer also checks this URL against its live SPA location.
+    scrollPageUrl,
+    scrollAllowed: !!scrollPageUrl && !status.tabPaused && !status.suspended && !sourcePaused && retryAt <= Date.now() &&
       pipeline.outstandingTotal < OUTSTANDING_LIMIT,
     manualProgress: manualActive ? { processed: run.status.processed || 0,
       submitted: run.status.catalogSynced || 0, pending: run.status.pending || 0 } : null });

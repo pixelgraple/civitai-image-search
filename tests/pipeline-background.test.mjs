@@ -64,7 +64,7 @@ test('one global600-ID capacity bounds all tabs and paused work remains inside t
   assert.equal(blocked.pipeline.paused, 300);
   assert.match((await h.message({ type: 'civitai-auto-status' }, sender(h, 8))).phase, /resume paused tabs/);
   await h.run('autoBrowseCollector.acknowledgeManual([{id:"1000"}])');
-  assert.equal((await h.message({ type: 'civitai-auto-status' }, sender(h, 8))).scrollAllowed, true);
+  assert.equal((await h.message({ type: 'civitai-auto-status' }, sender(h, 8))).scrollAllowed, false);
   const next = await h.message({ type: 'civitai-auto-cards', pageUrl: h.tabs.get(8).url, cards: [card(9999)] }, sender(h, 8));
   assert.equal(next.accepted.length, 1); assert.equal(next.pipeline.outstandingTotal, 600);
 });

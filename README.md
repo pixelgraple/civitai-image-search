@@ -4,7 +4,7 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.17](https://search-civitai.xyz/downloads/index-civitai-2.8.17.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.17)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.18](https://search-civitai.xyz/downloads/index-civitai-2.8.18.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.18)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Public browsing and contribution require no account or contributor key.
 
@@ -30,7 +30,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.17.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.18.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.
@@ -40,6 +40,8 @@ This is an unpacked Chromium extension. The download contains the browser extens
 
 ## Start contributing
 
+The website’s **[GUIDE](https://search-civitai.xyz/guide.php)** sits beside the extension download. It walks through choosing a gallery, opening the settings cogwheel, starting a scan and leaving it running while you use other tabs, with explanations of progress, skipped images and server storage.
+
 1. Open a gallery on `civitai.com` or `civitai.red` and choose its filters.
 2. Click **Index Civitai** in the browser toolbar, then **Scan this tab**.
 3. Leave that tab open. Discovery continues automatically; manual scrolling is not required.
@@ -48,7 +50,7 @@ This is an unpacked Chromium extension. The download contains the browser extens
 
 The separate **Server image transfers** slider controls actual image downloads for that tab, from **4 to 32** (default **32**). Use it in the tab's panel or select a tab in Browsing & activity. The server shares **32 total transfer slots** among contributors, so a target of 32 is a ceiling rather than a reserved allocation. Lowering the limit lets in-flight downloads finish before admitting more. Browser metadata uploads retain their 60-record batch and three-second pause.
 
-**Collect as I browse Civitai** defaults to on. It collects cards and automatically scrolls supported galleries, while detail pages can be indexed without scrolling. Creation, edit, upload, settings and generation forms are excluded. An explicit feed scan follows the selected page's captured feed filters and keeps paging until stopped or the feed ends.
+**Collect images as you browse** defaults to on. It collects visible cards without moving the page. Only galleries explicitly started with **Scan this tab** auto-scroll; changing pages revokes that scrolling permission. Creation, edit, upload, settings and generation forms are excluded. An explicit feed scan follows the selected page's captured feed filters and keeps paging until stopped or the feed ends.
 
 **Stop tab** pauses collection for that tab. **Resume tab** continues its saved scan position. **Stop all collection** stops feed scans and disables passive collection. An already running source request may take up to 20 seconds to finish.
 

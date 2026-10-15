@@ -2,6 +2,20 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.18
+
+- Auto-scroll only explicitly started scan tabs whose current page still matches the selected feed. Other Civitai browsing tabs retain manual scrolling.
+- Revoke scrolling permission on navigation and failed status refreshes, including stale responses from the previous page.
+- Release unprepared discoveries from closed, navigated-away or restored orphan scan tabs after a durable checkpoint. Preserve prepared prompt records, live paused queues and feed cursors for resuming.
+- Show the shared queue's preparing, ready-to-send and sending stages, with paused work identified as a subset. Clarify passive collection status.
+- Keep the Civitai request slider at default 1 / maximum 4, metadata batches at 60 per 3 seconds, and server transfer slots at 32. Live investigation showed prompt preparation and retained queue ownership rather than server upload saturation.
+
+### Website contributor guide — 2026-10-15
+
+- Add a GUIDE tab beside the extension download and a dedicated contributor walkthrough at `/guide.php`.
+- Explain choosing a gallery, the settings cogwheel, Scan this tab, background collection and completion messages.
+- Show how contributions grow the shared library, explain accepted records and skipped images, and link installation instructions from the guide.
+
 ## 2.8.17
 
 - Default to one active Civitai request across all tabs, with a live processing slider from one to four.

@@ -11,21 +11,22 @@ header('X-Frame-Options: DENY');
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Index Civitai turns the galleries you browse into a shared searchable library of images and prompts. Install the free community extension.">
   <title>Index Civitai · Install the community indexing extension</title>
-  <link rel="stylesheet" href="extension.css?v=2.8.17">
+  <link rel="stylesheet" href="extension.css?v=2.8.18">
+  <link rel="stylesheet" href="guide.css?v=contributor-guide-v1">
 </head>
 <body>
-  <header class="site-header"><a class="brand" href="/">SEARCH<span>CIVITAI</span><small>XYZ</small></a><nav aria-label="Site navigation"><a href="/">Image library</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav></header>
+  <header class="site-header"><a class="brand" href="/">SEARCH<span>CIVITAI</span><small>XYZ</small></a><nav class="contributor-nav" aria-label="Site navigation"><a class="library-nav" href="/">Image library</a><a class="nav-download" href="/downloads/index-civitai-2.8.18.zip" download>Index Civitai ↓</a><a class="nav-guide" href="/guide.php">GUIDE</a></nav></header>
   <main>
     <section class="intro">
-      <p class="eyebrow">COMMUNITY EXTENSION · VERSION 2.8.17</p>
+      <p class="eyebrow">COMMUNITY EXTENSION · VERSION 2.8.18</p>
       <h1>Browse Civitai.<br>Build a library everyone can search.</h1>
       <p class="lead">Index Civitai collects image links, prompts and generation details from your chosen galleries. The server saves image copies, and the community can search everything indexed so far.</p>
-      <div class="actions"><a class="button primary" href="/downloads/index-civitai-2.8.17.zip" download>Download Index Civitai 2.8.17</a><a class="button" href="#install">Installation guide ↓</a></div>
+      <div class="actions"><a class="button primary" href="/downloads/index-civitai-2.8.18.zip" download>Download Index Civitai 2.8.18</a><a class="button" href="#install">Installation guide ↓</a><a class="button" href="/guide.php">How to help index Civitai ↗</a></div>
       <p class="caption">For desktop Chromium browsers, including Chrome and Brave. No account or contributor key required.</p>
     </section>
     <section aria-labelledby="features"><div class="section-title"><p class="eyebrow">WHAT IT DOES</p><h2 id="features">Your browsing helps grow the shared index.</h2></div>
       <div class="features">
-        <article><span class="number">01</span><h3>Automatic collection</h3><p>Browse normally or choose <strong>Scan this tab</strong>. Supported galleries scroll automatically to discover more images. Several open tabs can contribute, each with its own stop and resume controls.</p></article>
+        <article><span class="number">01</span><h3>Automatic collection</h3><p>Choose a gallery and click <strong>Scan this tab</strong>. That tab scrolls automatically to discover more images while you use other tabs. Only galleries you explicitly start scanning auto-scroll, each with its own stop and resume controls.</p></article>
         <article><span class="number">02</span><h3>Search prompts and tags</h3><p>Search by prompt words, exact tags, LoRA names or captured creator usernames. Combine words and tags with AND or OR, and sort by Civitai reactions. View result counts, browse pages of image cards, and open an image with its prompt alongside it.</p></article>
         <article><span class="number">03</span><h3>Images saved on the server</h3><p>The extension submits metadata over HTTPS. The server fetches the image files. Collection does not save images to your computer or require you to hold server credentials.</p></article>
         <article><span class="number">04</span><h3>Live progress and controls</h3><p>Watch duplicate checks, prompt reads, submissions, retries and oversized skips update live. Adjust collection speed from <strong>1× to 5×</strong>. A separate 4–32 slider controls server image transfers for each tab, with live active, pending and stored counts. All tabs share a 600-image outstanding limit and 32 server transfer slots.</p></article>
@@ -36,15 +37,15 @@ header('X-Frame-Options: DENY');
     <section id="install" class="install" aria-labelledby="install-title">
       <div><p class="eyebrow">GET STARTED</p><h2 id="install-title">Install once.<br>Choose what to index.</h2><p>This is an unpacked browser extension. Keep its extracted folder in a permanent location.</p></div>
       <ol>
-        <li><strong>Download and extract the ZIP.</strong><span>Use the download above, or the matching v2.8.17 asset on GitHub Releases.</span></li>
+        <li><strong>Download and extract the ZIP.</strong><span>Use the download above, or the matching v2.8.18 asset on GitHub Releases.</span></li>
         <li><strong>Open your browser’s Extensions page.</strong><span>Visit <code>chrome://extensions</code> or <code>brave://extensions</code> and enable <strong>Developer mode</strong>.</span></li>
         <li><strong>Choose Load unpacked.</strong><span>Select the extracted folder containing <code>manifest.json</code>.</span></li>
-        <li><strong>Open a Civitai gallery.</strong><span>Works on civitai.com and civitai.red. Open the Index Civitai panel and choose <strong>Scan this tab</strong>, or leave browsing collection enabled.</span></li>
+        <li><strong>Open a Civitai gallery.</strong><span>Works on civitai.com and civitai.red. Open Index Civitai, choose settings with the cogwheel, click <strong>Done</strong>, then <strong>Scan this tab</strong>. Follow the <a href="/guide.php">contributor guide</a> for the full walkthrough.</span></li>
       </ol>
-      <p class="update"><strong>Already installed?</strong> Replace the files in your extension folder, click <strong>Reload</strong> on the Extensions page, and refresh your Civitai gallery tabs. Save unfinished upload or edit forms before refreshing them. Version 2.8.17 starts Civitai processing at one request across all tabs, with a live slider from one to four in the new cogwheel Settings panel. Automatic browsing, speed and server transfer preferences are grouped in Settings, while activity stays visible. Server image transfers retain their separate limits, and existing Civitai cooldowns are respected. Your queued prompts and progress are retained. Reload the extension to activate the fix. The server can also repair missing metadata from previously indexed image pages; that job runs independently of your browser.</p>
+      <p class="update"><strong>Already installed?</strong> Replace the files in your extension folder, click <strong>Reload</strong> on the Extensions page, and refresh your Civitai gallery tabs. Save unfinished upload or edit forms before refreshing them. Version 2.8.18 limits automatic scrolling to tabs you explicitly start, releases unfinished discoveries left behind by closed scan tabs, and shows which shared queue stage is waiting. Collected prompt records and saved scan positions are retained. The settings cogwheel keeps Civitai processing adjustable from one to four, with separate server transfer settings. Reload the extension to activate these fixes. The server can also repair missing metadata from previously indexed image pages; that job runs independently of your browser.</p>
     </section>
     <section class="details" aria-labelledby="details-title"><p class="eyebrow">HOW COLLECTION WORKS</p><h2 id="details-title">A few useful details</h2>
-      <details><summary>Does it run without me scrolling?</summary><p>Yes, supported galleries scroll automatically while the browser and tabs remain open. Background tabs can collect without focus. Collection pauses when the queue is full, and sleeping computers or suspended tabs cannot continue normal work.</p></details>
+      <details><summary>Does it run without me scrolling?</summary><p>Yes. Click <strong>Scan this tab</strong> on your chosen gallery. That tab can collect without focus while the browser stays open; your other Civitai browsing tabs stay under your control. Collection pauses when the queue is full, and sleeping computers or suspended tabs cannot continue normal work. See the <a href="/guide.php">contributor guide</a> for the steps and progress messages.</p></details>
       <details><summary>What data is shared?</summary><p>Collected records include the image ID and link, positive and available negative prompts, tags, model and LoRA names, captured uploader usernames, dimensions, and available source reactions. Submitted records and stored images become part of the public library. The browser keeps scan progress locally; the extension does not send Civitai passwords or login cookies to the library.</p></details>
       <details><summary>Why are some images skipped?</summary><p>Images need a positive prompt. New or queued images over 9,000,000 total pixels, or over 4096 pixels on either side, are skipped. Both limits apply: 4096 × 4096 exceeds 9 MP. Completed copies from before these limits remain available.</p></details>
       <details><summary>How fast does it submit?</summary><p>Up to 60 ready metadata records are sent per batch with a three-second pause. The server separately downloads up to 32 image files concurrently. Each tab has a live 4–32 transfer slider, defaulting to 32, and all contributors share those 32 server slots. Completed transfers release a slot immediately for the next file. Actual throughput depends on available prompts, browser activity, source responses and server capacity. Civitai and library rate limits still apply, and retries honor cooldowns.</p></details>
@@ -53,6 +54,6 @@ header('X-Frame-Options: DENY');
     </section>
     <section class="closing"><div><h2>Help make prompts easier to find.</h2><p>Index the galleries you choose, then search the growing community library.</p></div><a class="button primary" href="/">Explore the library ↗</a></section>
   </main>
-  <footer><span>Independent community project.</span><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">Source and documentation on GitHub ↗</a><a href="/downloads/index-civitai-2.8.17.zip" download>Download 2.8.17</a></footer>
+  <footer><span>Independent community project.</span><a href="/guide.php">Contributor guide</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">Source and documentation on GitHub ↗</a><a href="/downloads/index-civitai-2.8.18.zip" download>Download 2.8.18</a></footer>
 </body>
 </html>
