@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.13', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.14', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
   let saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
   let latest = null, revision = 0, statusPort = null, portReady = false, reconnectTimer = null, handshakeTimer = null, reconnectAttempts = 0, disposed = false;

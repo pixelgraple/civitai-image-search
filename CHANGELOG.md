@@ -2,6 +2,15 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.14
+
+- Show creator usernames beneath the image heading, with a two-tab action for their Civitai profile and exact-username library search.
+- Add shareable creator-library URLs and separate links when the browser blocks multiple new tabs.
+- Record the actual .red or .com capture domain in new submissions and metadata-only duplicate revisits; retain the first recorded domain.
+- Preserve capture origin in manual, automatic and resumed extension queues, without downloading stored images again.
+- Let visitors choose a profile domain for older records whose original capture site was never saved.
+- Include the clickable tag/model searches and model filter already published on the website.
+
 ## Website update — 2026-10-15
 
 - Make generation model names clickable and add a dedicated Model name filter for captured model names, including case-insensitive name fragments.

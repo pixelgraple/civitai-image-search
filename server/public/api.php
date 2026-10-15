@@ -56,7 +56,7 @@ try {
             $deadline=microtime(true)+5.0;
             foreach ($ids as $id) {
                 if (!isset($knownIds[$id])) {
-                    $items[]=[...check_image_storage($pdo,null,$id),'reactionsMissing'=>true,'creatorMissing'=>true]; continue;
+                    $items[]=[...check_image_storage($pdo,null,$id),'reactionsMissing'=>true,'creatorMissing'=>true,'sourcePageMissing'=>true]; continue;
                 }
                 if (microtime(true)>=$deadline) { $deferred[]=$id; continue; }
                 $locks=[];
@@ -70,6 +70,7 @@ try {
                     $pdo->commit();
                     $storage['reactionsMissing']=source_reactions_missing($row ? json_decode($row['reactions_json'],true) : null);
                     $storage['creatorMissing']=!$row || trim((string)$row['creator_name'])==='';
+                    $storage['sourcePageMissing']=!$row || normalize_captured_page_url($row['source_page_url']??null,$id)==='';
                     $items[]=$storage;
                 } catch (Throwable $error) {
                     if ($pdo->inTransaction()) $pdo->rollBack();
@@ -92,6 +93,7 @@ try {
                     $storage=check_image_storage($pdo,$row,$id,$inspections[$id]??null);
                     $storage['reactionsMissing']=source_reactions_missing($row ? json_decode($row['reactions_json'],true) : null);
                     $storage['creatorMissing']=!$row || trim((string)$row['creator_name'])==='';
+                    $storage['sourcePageMissing']=!$row || normalize_captured_page_url($row['source_page_url']??null,(string)$id)==='';
                     $items[]=$storage;
                 }
                 $pdo->commit();
@@ -113,6 +115,7 @@ try {
     if ($action === 'search' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $q=search_parameter('q'); $tag=search_parameter('tag','',4000);
         $lora=search_parameter('lora','',200); $creator=ltrim(search_parameter('creator','',200),'@');
+        $creatorMatch=search_parameter('creatorMatch','contains',8);
         $model=search_parameter('model','',300);
         $category=search_parameter('category','',20); $sort=search_parameter('sort','newest',30);
         $qMode=search_parameter('qMode','all',3); $tagMode=search_parameter('tagMode','all',3);
@@ -124,6 +127,7 @@ try {
         if (!in_array($category, ['', 'anime', 'realistic', 'uncertain'], true)) json_response(['ok'=>false,'error'=>'Invalid category.'], 400);
         if (!in_array($qMode,['all','any'],true) || !in_array($tagMode,['all','any'],true)) json_response(['ok'=>false,'error'=>'Use all or any for keyword and tag matching.'],400);
         if (!in_array($tagMatch,['list','exact'],true)) json_response(['ok'=>false,'error'=>'Use list or exact for tag input.'],400);
+        if (!in_array($creatorMatch,['contains','exact'],true)) json_response(['ok'=>false,'error'=>'Use contains or exact for creator matching.'],400);
         $terms = preg_split('/[^\p{L}\p{N}]+/u', lower_text($q), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $tagValues=$tagMatch==='exact' ? [$tag] : (preg_split('/[,\r\n]+/u',$tag)?:[]);
         $tags=array_values(array_filter(array_map(static fn($value)=>lower_text(trim($value)),$tagValues),static fn($value)=>$value!==''));
@@ -141,7 +145,7 @@ try {
         }
         // instr treats %, _, quotes, and backslashes as literal name characters.
         if ($lora!=='') { $where[]='EXISTS (SELECT 1 FROM json_each(i.loras_json) jl WHERE instr(catalog_lower(CAST(jl.value AS TEXT)),?)>0)'; $args[]=lower_text($lora); }
-        if ($creator!=='') { $where[]='instr(catalog_lower(i.creator_name),?)>0'; $args[]=lower_text($creator); }
+        if ($creator!=='') { $where[]=$creatorMatch==='exact' ? 'catalog_lower(i.creator_name)=?' : 'instr(catalog_lower(i.creator_name),?)>0'; $args[]=lower_text($creator); }
         if ($model!=='') { $where[]='instr(catalog_lower(i.model_name),?)>0'; $args[]=lower_text($model); }
         $baseWhere=$where; $baseArgs=$args;
         if ($category !== '') { $where[] = 'i.style_category=?'; $args[] = $category; }
@@ -163,7 +167,7 @@ try {
         foreach ($args as $index=>$value) $stmt->bindValue($index+1,$value,PDO::PARAM_STR);
         $stmt->bindValue(count($args)+1,$limit,PDO::PARAM_INT); $stmt->bindValue(count($args)+2,$offset,PDO::PARAM_INT); $stmt->execute();
         $items = array_map('public_image_row',$stmt->fetchAll());
-        json_response(['ok'=>true,'items'=>$items,'total'=>$total,'page'=>$page,'limit'=>$limit,'pages'=>(int)ceil($total/$limit),'categoryCounts'=>$counts,'sort'=>$sort,'qMode'=>$qMode,'tagMode'=>$tagMode]);
+        json_response(['ok'=>true,'items'=>$items,'total'=>$total,'page'=>$page,'limit'=>$limit,'pages'=>(int)ceil($total/$limit),'categoryCounts'=>$counts,'sort'=>$sort,'qMode'=>$qMode,'tagMode'=>$tagMode,'creatorMatch'=>$creatorMatch]);
     }
     if ($action === 'images' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         authenticate_writer();
@@ -174,9 +178,9 @@ try {
         }
         $pdo=db(); $now=gmdate('c'); $saved=0; $skipped=0; $queuedIds=[]; $skippedItems=[];
         $existing=$pdo->prepare('SELECT * FROM images WHERE image_id=?');
-        $upsert=$pdo->prepare("INSERT INTO images(image_id,source_url,prompt,negative_prompt,tags_json,model_name,creator_name,loras_json,reactions_json,image_width,image_height,style_category,style_confidence,style_signals_json,download_status,discovered_at,updated_at)
-          VALUES(:id,:url,:prompt,:negative,:tags,:model,:creator,:loras,:reactions,:width,:height,:category,:confidence,:signals,'pending',:now,:now)
-          ON CONFLICT(image_id) DO UPDATE SET source_url=excluded.source_url,prompt=excluded.prompt,negative_prompt=excluded.negative_prompt,tags_json=excluded.tags_json,model_name=excluded.model_name,creator_name=excluded.creator_name,loras_json=excluded.loras_json,reactions_json=excluded.reactions_json,image_width=excluded.image_width,image_height=excluded.image_height,style_category=excluded.style_category,style_confidence=excluded.style_confidence,style_signals_json=excluded.style_signals_json,updated_at=excluded.updated_at");
+        $upsert=$pdo->prepare("INSERT INTO images(image_id,source_url,source_page_url,prompt,negative_prompt,tags_json,model_name,creator_name,loras_json,reactions_json,image_width,image_height,style_category,style_confidence,style_signals_json,download_status,discovered_at,updated_at)
+          VALUES(:id,:url,:page_url,:prompt,:negative,:tags,:model,:creator,:loras,:reactions,:width,:height,:category,:confidence,:signals,'pending',:now,:now)
+          ON CONFLICT(image_id) DO UPDATE SET source_url=excluded.source_url,source_page_url=excluded.source_page_url,prompt=excluded.prompt,negative_prompt=excluded.negative_prompt,tags_json=excluded.tags_json,model_name=excluded.model_name,creator_name=excluded.creator_name,loras_json=excluded.loras_json,reactions_json=excluded.reactions_json,image_width=excluded.image_width,image_height=excluded.image_height,style_category=excluded.style_category,style_confidence=excluded.style_confidence,style_signals_json=excluded.style_signals_json,updated_at=excluded.updated_at");
         $ftsDel=$pdo->prepare('DELETE FROM images_fts WHERE image_id=?');
         $ftsIns=$pdo->prepare('INSERT INTO images_fts(image_id,prompt,negative_prompt,tags,model_name,lora_names) VALUES(?,?,?,?,?,?)');
         $eligibleIds=[];
@@ -205,6 +209,7 @@ try {
                 $prompt=cut_text(trim(is_string($item['prompt']??null)?$item['prompt']:''),20000); $negative=cut_text(trim((string)($item['negativePrompt']??'')),10000);
                 $tags=normalize_strings($item['tags']??[]); $loras=normalize_strings($item['loras']??[]); $model=cut_text(trim((string)($item['modelName']??'')),300);
                 $creator=normalize_creator_name($item['creatorName']??null);
+                $pageUrl=normalize_captured_page_url($item['capturedPageUrl']??null,(string)$item['id']);
                 $reactions=normalize_reactions($item['reactions']??null); $width=image_dimension($item['width']??null); $height=image_dimension($item['height']??null);
                 $existing->execute([(string)$item['id']]); $prior=$existing->fetch();
                 if (image_size_exceeds_limits($item['width']??0,$item['height']??0)) {
@@ -218,6 +223,7 @@ try {
                     if (!$loras) $loras=json_decode($prior['loras_json'],true) ?: [];
                     if ($model==='') $model=(string)$prior['model_name'];
                     if ($creator==='') $creator=(string)$prior['creator_name'];
+                    $pageUrl=normalize_captured_page_url($prior['source_page_url']??null,(string)$item['id']) ?: $pageUrl;
                     $reactions=array_replace(json_decode($prior['reactions_json'],true) ?: [],$reactions);
                     if (!$width) $width=(int)$prior['image_width'];
                     if (!$height) $height=(int)$prior['image_height'];
@@ -232,7 +238,7 @@ try {
                     $skipped++; $skippedItems[]=['imageId'=>(string)$item['id'],'reason'=>'oversize']; continue;
                 }
                 $style=classify_style($prompt,$model,$loras,$tags);
-                $values=[':id'=>(string)$item['id'],':url'=>$url,':prompt'=>$prompt,':negative'=>$negative,':tags'=>json_encode($tags),':model'=>$model,':creator'=>$creator,':loras'=>json_encode($loras),':reactions'=>json_encode((object)$reactions),':width'=>$width,':height'=>$height,':category'=>$style['category'],':confidence'=>$style['confidence'],':signals'=>json_encode($style['signals']),':now'=>$now];
+                $values=[':id'=>(string)$item['id'],':url'=>$url,':page_url'=>$pageUrl,':prompt'=>$prompt,':negative'=>$negative,':tags'=>json_encode($tags),':model'=>$model,':creator'=>$creator,':loras'=>json_encode($loras),':reactions'=>json_encode((object)$reactions),':width'=>$width,':height'=>$height,':category'=>$style['category'],':confidence'=>$style['confidence'],':signals'=>json_encode($style['signals']),':now'=>$now];
                 $searchFields=[$prompt,$negative,implode(' ',$tags),$model,implode(' ',$loras)];
                 $priorSearchFields=$prior ? [(string)$prior['prompt'],(string)$prior['negative_prompt'],implode(' ',json_decode($prior['tags_json'],true)?:[]),(string)$prior['model_name'],implode(' ',json_decode($prior['loras_json'],true)?:[])] : null;
                 $upsert->execute($values);

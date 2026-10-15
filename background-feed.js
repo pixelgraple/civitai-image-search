@@ -146,7 +146,16 @@ globalThis.ISSFeed = (() => {
     if (creatorName) await observeCreator?.(creatorName);
     return imageReactions(result.stats);
   }
-  function civitaiCatalogRecord(image, post = {}, enrichment = {}) {
+  function imagePageUrl(id, capturedPageUrl) {
+    try {
+      const url = new URL(capturedPageUrl);
+      if (!/^[1-9]\d{0,19}$/.test(String(id)) || !Number.isSafeInteger(Number(id)) ||
+          url.protocol !== 'https:' || !['civitai.com', 'civitai.red'].includes(url.hostname) ||
+          url.username || url.password || url.port) return '';
+      return `${url.origin}/images/${id}`;
+    } catch { return ''; }
+  }
+  function civitaiCatalogRecord(image, post = {}, enrichment = {}, capturedPageUrl = '') {
     if (!image || typeof image !== 'object') return null;
     const downloadUrl = civitaiImage(image)?.url || '';
     if (!downloadUrl) return null;
@@ -182,7 +191,8 @@ globalThis.ISSFeed = (() => {
     const creatorName = imageCreator(enrichment.detail) || imageCreator(image, post);
     const width = imageDimension(enrichment.detail?.width, image.width);
     const height = imageDimension(enrichment.detail?.height, image.height);
-    return { id: String(id), pageUrl: `https://civitai.red/images/${encodeURIComponent(id)}`, previewUrl, downloadUrl,
+    const sourcePage = imagePageUrl(id, capturedPageUrl);
+    return { id: String(id), pageUrl: sourcePage, ...(sourcePage ? { capturedPageUrl: sourcePage } : {}), previewUrl, downloadUrl,
       prompt, negativePrompt, tags, modelName, loras, reactions, creatorName,
       ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }),
       updatedAt: Date.now(), source: 'civitai' };
@@ -221,7 +231,7 @@ globalThis.ISSFeed = (() => {
     const candidates = new Map();
     for (const post of posts) {
       for (const image of Array.isArray(post.images) ? post.images : [post]) {
-        const initial = civitaiCatalogRecord(image, post);
+        const initial = civitaiCatalogRecord(image, post, {}, feed.pageUrl);
         if (initial && !candidates.has(initial.id)) candidates.set(initial.id, { image, post, initial });
       }
     }
@@ -258,7 +268,7 @@ globalThis.ISSFeed = (() => {
                 if (!initial.prompt || !initial.modelName || !Array.isArray(resources))
                   enrichment.generation = await civitaiMetadata(feed, 'image.getGenerationData', initial.id, siteRequest);
                 if (!initial.tags.length) enrichment.detail = await civitaiMetadata(feed, 'image.getDetail', initial.id, siteRequest);
-                const record = civitaiCatalogRecord(image, post, enrichment);
+                const record = civitaiCatalogRecord(image, post, enrichment, feed.pageUrl);
                 if (imageExceedsLimits(record)) {
                   await onProgress({ phase: 'metadata-oversize', id: initial.id, completed, total: pending.length });
                   return null;
@@ -305,5 +315,5 @@ globalThis.ISSFeed = (() => {
     return { items, catalogItems, cursor, done, count: data.items.length };
   }
   return { fromRequests, next: trpc, decode,
-    civitaiMetadata, civitaiCatalogRecord, civitaiPageReactions, imageReactions, imageCreator, hasCoreReactions, imageExceedsLimits };
+    civitaiMetadata, civitaiCatalogRecord, civitaiPageReactions, imageReactions, imageCreator, hasCoreReactions, imageExceedsLimits, imagePageUrl };
 })();

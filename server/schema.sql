@@ -9,6 +9,7 @@ CREATE INDEX IF NOT EXISTS ingest_request_windows_expiry ON ingest_request_windo
 CREATE TABLE IF NOT EXISTS images (
   image_id TEXT PRIMARY KEY,
   source_url TEXT NOT NULL,
+  source_page_url TEXT NOT NULL DEFAULT '',
   file_path TEXT,
   mime_type TEXT,
   file_size INTEGER NOT NULL DEFAULT 0,

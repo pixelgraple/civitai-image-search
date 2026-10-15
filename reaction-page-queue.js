@@ -45,7 +45,7 @@ globalThis.ISSReactionPages = (() => {
         const reactions = await read(item);
         if (pending.get(item.id) !== item) return;
         if (!Object.keys(reactions || {}).length) throw Object.assign(new Error('Image page reactions are not currently available.'), { retryAfterMs: 300000 });
-        await observe(item.id, reactions);
+        await observe(item.id, reactions, item.pageUrl);
         pending.delete(item.id); seen.set(item.id, now());
         while (seen.size > 5000) seen.delete(seen.keys().next().value);
         lastError = '';

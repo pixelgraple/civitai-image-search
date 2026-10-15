@@ -2,11 +2,21 @@
 globalThis.PromptCatalogDB = (() => {
   const DB_NAME = 'civitai-prompt-catalog';
   const DB_VERSION = 1;
+  function capturedPage(id,value) {
+    try {
+      const url=new URL(value);
+      return url.protocol==='https:' && ['civitai.com','civitai.red'].includes(url.hostname) &&
+        !url.username && !url.password && !url.port && !url.search && !url.hash && url.pathname===`/images/${id}` ? url.href : '';
+    } catch { return ''; }
+  }
   function mergeRecords(prior,record) {
     const merged={...prior,...record};
+    // Only capturedPageUrl carries observed origin; legacy pageUrl assumed .red.
+    const capturedPageUrl=capturedPage(merged.id,prior.capturedPageUrl) || capturedPage(merged.id,record.capturedPageUrl);
     for (const field of ['prompt','negativePrompt','modelName','creatorName','downloadUrl','previewUrl','pageUrl']) {
       if (!String(record[field] ?? '').trim() && prior[field]) merged[field]=prior[field];
     }
+    if (capturedPageUrl) { merged.capturedPageUrl=capturedPageUrl; merged.pageUrl=capturedPageUrl; }
     for (const field of ['tags','loras']) {
       if (!record[field]?.length && prior[field]?.length) merged[field]=prior[field];
     }

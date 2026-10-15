@@ -24,7 +24,7 @@ function db(): PDO {
     if ($schema===false) throw new RuntimeException('Database schema is unavailable.');
     $pdo->exec($schema);
     $columns=array_column($pdo->query('PRAGMA table_info(images)')->fetchAll(),'name');
-    foreach (['reactions_json'=>"TEXT NOT NULL DEFAULT '{}'",'image_width'=>'INTEGER NOT NULL DEFAULT 0','image_height'=>'INTEGER NOT NULL DEFAULT 0','creator_name'=>"TEXT NOT NULL DEFAULT ''"] as $column=>$definition) {
+    foreach (['reactions_json'=>"TEXT NOT NULL DEFAULT '{}'",'image_width'=>'INTEGER NOT NULL DEFAULT 0','image_height'=>'INTEGER NOT NULL DEFAULT 0','creator_name'=>"TEXT NOT NULL DEFAULT ''",'source_page_url'=>"TEXT NOT NULL DEFAULT ''"] as $column=>$definition) {
         if (in_array($column,$columns,true)) continue;
         try { $pdo->exec('ALTER TABLE images ADD COLUMN '.$column.' '.$definition); }
         catch (PDOException $error) {
@@ -115,6 +115,13 @@ function normalize_creator_name(mixed $value): string {
     return cut_text(ltrim(trim($value),'@'),200);
 }
 
+/** Recorded capture provenance must be an image page for this ID, never a CDN URL. */
+function normalize_captured_page_url(mixed $value,string $id): string {
+    if (!is_string($value) || !valid_image_id($id) || strlen($value)>160 ||
+        !preg_match('~\Ahttps://(?:www\.)?(civitai\.(?:red|com))/images/([1-9][0-9]{0,19})/?\z~i',$value,$parts) || $parts[2]!==$id) return '';
+    return 'https://'.strtolower($parts[1]).'/images/'.$id;
+}
+
 /** Query values must be strings, bounded, and valid UTF-8 before any SQL construction. */
 function search_parameter(string $key,string $default='',int $maxLength=300): string {
     $value=$_GET[$key]??$default;
@@ -124,25 +131,29 @@ function search_parameter(string $key,string $default='',int $maxLength=300): st
     return trim($value);
 }
 
-/** Refresh source reactions and creator attribution without inspecting media or prompt fields. */
+/** Refresh source attribution and reactions without inspecting media or prompt fields. */
 function update_source_reactions(PDO $pdo,array $items): array {
     $records=[]; $skipped=0;
     foreach ($items as $item) {
         if (!is_array($item) || !valid_image_id($item['id']??null)) {
             $skipped++; continue;
         }
-        $counts=normalize_reactions($item['reactions']??null); $creator=normalize_creator_name($item['creatorName']??null);
-        if (!$counts && $creator==='') { $skipped++; continue; }
         $id=(string)$item['id'];
+        $counts=normalize_reactions($item['reactions']??null); $creator=normalize_creator_name($item['creatorName']??null);
+        // Legacy pageUrl values were synthesized as .red, so only the new explicit
+        // capturedPageUrl field is evidence of which site the contributor visited.
+        $pageUrl=normalize_captured_page_url($item['capturedPageUrl']??null,$id);
+        if (!$counts && $creator==='' && $pageUrl==='') { $skipped++; continue; }
         $records[$id]=[
             'reactions'=>array_replace($records[$id]['reactions']??[],$counts),
             'creatorName'=>$creator!=='' ? $creator : ($records[$id]['creatorName']??''),
+            'capturedPageUrl'=>($records[$id]['capturedPageUrl']??'') ?: $pageUrl,
         ];
     }
     $accepted=0; $updated=0; $missingIds=[];
     if (!$records) return compact('accepted','updated','skipped','missingIds');
-    $find=$pdo->prepare('SELECT reactions_json,creator_name FROM images WHERE image_id=?');
-    $update=$pdo->prepare('UPDATE images SET reactions_json=?,creator_name=?,updated_at=? WHERE image_id=?');
+    $find=$pdo->prepare('SELECT reactions_json,creator_name,source_page_url FROM images WHERE image_id=?');
+    $update=$pdo->prepare('UPDATE images SET reactions_json=?,creator_name=?,source_page_url=?,updated_at=? WHERE image_id=?');
     $pdo->beginTransaction();
     try {
         foreach ($records as $id=>$record) {
@@ -151,8 +162,9 @@ function update_source_reactions(PDO $pdo,array $items): array {
             $prior=normalize_reactions(json_decode($row['reactions_json'],true));
             $merged=array_replace($prior,$record['reactions']);
             $creator=$record['creatorName']!=='' ? $record['creatorName'] : (string)$row['creator_name']; $accepted++;
-            if ($merged==$prior && $creator===(string)$row['creator_name']) continue;
-            $update->execute([json_encode((object)$merged,JSON_THROW_ON_ERROR),$creator,gmdate('c'),$id]); $updated++;
+            $pageUrl=normalize_captured_page_url($row['source_page_url']??null,$id) ?: $record['capturedPageUrl'];
+            if ($merged==$prior && $creator===(string)$row['creator_name'] && $pageUrl===(string)$row['source_page_url']) continue;
+            $update->execute([json_encode((object)$merged,JSON_THROW_ON_ERROR),$creator,$pageUrl,gmdate('c'),$id]); $updated++;
         }
         $pdo->commit();
     } catch (Throwable $error) {
@@ -509,10 +521,14 @@ function authenticate_writer(): void {
 
 function public_image_row(array $row): array {
     $id = (string)$row['image_id'];
+    $capturedPageUrl=normalize_captured_page_url($row['source_page_url']??null,$id);
+    $sourceDomain=$capturedPageUrl!=='' ? (string)parse_url($capturedPageUrl,PHP_URL_HOST) : '';
     $sourceReactions=normalize_reactions(json_decode($row['reactions_json'],true));
     $sourceTotal=source_reactions_missing($sourceReactions) ? null : array_sum(array_intersect_key($sourceReactions,array_flip(['likeCount','heartCount','laughCount','cryCount'])));
     return [
-        'id'=>$id, 'pageUrl'=>'https://civitai.red/images/' . rawurlencode($id),
+        'id'=>$id, 'pageUrl'=>$capturedPageUrl ?: 'https://civitai.red/images/' . rawurlencode($id),
+        'capturedPageUrl'=>$capturedPageUrl, 'sourceDomain'=>$sourceDomain,
+        'sourceOrigin'=>$sourceDomain!=='' ? 'https://'.$sourceDomain : '',
         'previewUrl'=>($row['download_status'] === 'ready') ? 'media.php?id=' . rawurlencode($id) . '&variant=thumb' : '',
         'downloadUrl'=>($row['download_status'] === 'ready') ? 'media.php?id=' . rawurlencode($id) : '',
         'prompt'=>$row['prompt'], 'negativePrompt'=>$row['negative_prompt'],

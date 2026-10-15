@@ -91,6 +91,12 @@ globalThis.ISSBrowseCollector = (() => {
           saved.tabs[id][field] = Math.max(0, Number(saved.tabs[id][field]) || 0);
         saved.tabs[id].phase = 'waiting to resume';
       }
+      for (const entry of saved.pending) {
+        if (entry.record) {
+          const capturedPageUrl = deps.validCapture?.(entry.card.id, entry.record.capturedPageUrl) || deps.capturePage?.(entry.card.id, entry.pageUrl);
+          if (capturedPageUrl) Object.assign(entry.record, { capturedPageUrl, pageUrl: capturedPageUrl });
+        }
+      }
       saved.processed = Math.max(Number(saved.processed) || 0, Number(saved.synced) || 0);
       saved.publicMode = true; pruneSeen();
       retryAt = Math.max(0, Math.min(Number(saved.retryAt) || 0, Date.now() + 300000)); saved.retryAt = retryAt;
@@ -148,12 +154,12 @@ globalThis.ISSBrowseCollector = (() => {
       pruneSeen(); const accepted = [], newlyQueued = [];
       for (const value of (Array.isArray(message.cards) ? message.cards : []).slice(0, speed().discoveryBatchSize)) {
         const item = card(value); if (!item) continue;
-        if (Object.keys(item.reactions).length || item.creatorName) {
+        if (Object.keys(item.reactions).length || item.creatorName || deps.capturePage?.(item.id, reported.href)) {
           // Already stored/seen images still contribute newly observed counts.
           // This shared metadata queue never requests an image download.
           const queued = saved.pending.find(entry => entry.card.id === item.id);
           if (message.reactionsOnly === true || saved.seen.some(entry => entry.id === item.id) || (queued && submitting.has(queued)))
-            await deps.observeReactions?.(item.id, item.reactions, item.creatorName);
+            await deps.observeReactions?.(item.id, item.reactions, item.creatorName, reported.href);
           if (queued) {
             queued.card.reactions = { ...(queued.card.reactions || {}), ...item.reactions };
             if (queued.record) queued.record.reactions = { ...(queued.record.reactions || {}), ...item.reactions };
@@ -261,7 +267,8 @@ globalThis.ISSBrowseCollector = (() => {
           if (result.downloadStatus === 'skipped' && result.skipReason === 'oversize') {
             await skipOversize(entry); return result;
           }
-          await deps.observeReactions?.(entry.card.id, entry.card.reactions, entry.card.creatorName);
+          await deps.observeReactions?.(entry.card.id, entry.card.reactions, entry.card.creatorName,
+            result.sourcePageMissing === false ? '' : entry.pageUrl);
           // A verified original can still be pending its thumbnail repair. Its
           // source metadata and original transfer do not need to be repeated.
           markProcessed(entry); remove(entry); markSeen(entry.card.id);
@@ -289,6 +296,8 @@ globalThis.ISSBrowseCollector = (() => {
       if (checked?.exists === true || !await current()) return null;
       deps.stage?.(entry.card.id, entry.tabId, entry.record ? 'readyUpload' : 'waitingMetadata');
       if (entry.record?.id === entry.card.id && String(entry.record.prompt || '').trim()) {
+        const capturedPageUrl = deps.validCapture?.(entry.card.id, entry.record.capturedPageUrl) || deps.capturePage?.(entry.card.id, entry.pageUrl);
+        if (capturedPageUrl) Object.assign(entry.record, { capturedPageUrl, pageUrl: capturedPageUrl });
         if (deps.oversize?.(entry.record)) { await skipOversize(entry); return null; }
         return { entry, record: entry.record, current };
       }
@@ -305,7 +314,7 @@ globalThis.ISSBrowseCollector = (() => {
         const generationData = await deps.metadata(entry, 'image.getGenerationData', current);
         if (!await current()) return null;
         let record = deps.record({ ...detail, reactions: entry.card.reactions, id: Number(entry.card.id), type: 'image', url: detail.url || entry.card.previewUrl,
-          width: detail.width || entry.card.width, height: detail.height || entry.card.height }, { generation: generationData, detail });
+          width: detail.width || entry.card.width, height: detail.height || entry.card.height }, { generation: generationData, detail }, entry.pageUrl);
         if (!record) { markProcessed(entry); remove(entry); await persist(); return null; }
         if (!record.creatorName) record.creatorName = creatorName(entry.card.creatorName);
         if (deps.oversize?.(record)) { await skipOversize(entry); return null; }

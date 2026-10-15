@@ -5,7 +5,7 @@ importScripts('collection-speed.js', 'download-settings.js', 'catalog-check-queu
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.13', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.14', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -42,10 +42,12 @@ const sourceReactionUpdates = ISSSourceReactions.create({
   cooldownUntil: () => uploadCooldownUntil, changed: notifyStatusChanged,
   error: error => addDebug('source-reactions', String(error?.message || error))
 });
-const observeSourceReactions = (id, reactions, creatorName = '') => sourceReactionUpdates.observe(id, reactions, { creatorName }).catch(error => addDebug('source-reactions', error.message));
+const observeSourceReactions = (id, reactions, creatorName = '', capturedPageUrl = '') => sourceReactionUpdates.observe(id, reactions,
+  { creatorName, capturedPageUrl: ISSFeed.imagePageUrl(id, capturedPageUrl) }).catch(error => addDebug('source-reactions', error.message));
 const reactionPages = ISSReactionPages.create({
   load: () => readStorage('civitaiReactionPagesV1'), save: value => writeStorage('civitaiReactionPagesV1', value),
-  observe: (id, reactions) => sourceReactionUpdates.observe(id, reactions, { retainMissing: true }), changed: notifyStatusChanged,
+  observe: (id, reactions, capturedPageUrl) => sourceReactionUpdates.observe(id, reactions,
+    { retainMissing: true, capturedPageUrl: ISSFeed.imagePageUrl(id, capturedPageUrl) }), changed: notifyStatusChanged,
   report: error => addDebug('reaction-page', String(error?.message || error)),
   read: async item => {
     const config = await readCloudCatalogConfig();
@@ -59,7 +61,8 @@ const reactionPages = ISSReactionPages.create({
     const current = async () => eligible(await getTab(tab.id)) && ((await readCloudCatalogConfig()).autoBrowse || activeRuns().length > 0);
     return ISSFeed.civitaiPageReactions({ pageUrl: item.pageUrl }, item.id,
       url => requestCivitaiFeed(tab.id, url, tab.url, current),
-      creatorName => sourceReactionUpdates.observe(item.id, {}, { creatorName, retainMissing: true }));
+      creatorName => sourceReactionUpdates.observe(item.id, {}, { creatorName, retainMissing: true,
+        capturedPageUrl: ISSFeed.imagePageUrl(item.id, item.pageUrl) }));
   }
 });
 const deferReactionPage = (id, tabId, pageUrl) => reactionPages.enqueue({ id: String(id), tabId, pageUrl });
@@ -317,7 +320,8 @@ async function restoreAll() {
     run.uploadRetryAt = Math.max(0, Math.min(Number(prior.uploadRetryAt) || 0, Date.now() + 300000));
     for (const record of Object.values(prior.preparedRecords || {})) {
       if (record && /^[1-9]\d{0,19}$/.test(String(record.id)) && String(record.prompt || '').trim() && !run.catalogSyncedIds.includes(String(record.id))) {
-        run.preparedRecords[String(record.id)] = record;
+        const capturedPageUrl = ISSSourceReactions.capturedPageUrl(record.id, record.capturedPageUrl) || ISSFeed.imagePageUrl(record.id, pageUrl);
+        run.preparedRecords[String(record.id)] = { ...record, pageUrl: capturedPageUrl, capturedPageUrl };
         if (!run.outstandingIds.includes(String(record.id))) run.outstandingIds.push(String(record.id));
       }
     }
@@ -476,14 +480,15 @@ async function backgroundFeedPulse(tabId) {
         }
         if (progress.phase === 'metadata-admit') {
           const id = String(progress.id);
-          if (run.catalogSyncedIds.includes(id)) { observeSourceReactions(id, progress.reactions, progress.creatorName); return { skip: true }; }
+          if (run.catalogSyncedIds.includes(id)) { observeSourceReactions(id, progress.reactions, progress.creatorName, run.settings.pageUrl); return { skip: true }; }
           if (run.catalogPromptlessSkippedIds.includes(id) || run.catalogOversizeSkippedIds.includes(id)) return { skip: true };
           await admitManualImage(id, run, current);
           markOutstanding(id, 'manual', tabId, 'waitingDuplicateCheck');
           const stored = await checkQueuedCatalogImage(id, current);
           if (!current()) throw Object.assign(new Error('Collection was paused.'), { status: 409 });
           if (stored.exists) {
-            if (stored.downloadStatus !== 'skipped') observeSourceReactions(id, progress.reactions, progress.creatorName);
+            if (stored.downloadStatus !== 'skipped') observeSourceReactions(id, progress.reactions, progress.creatorName,
+              stored.sourcePageMissing === false ? '' : run.settings.pageUrl);
             run.catalogIds = [...new Set([...run.catalogIds, id])];
             run.catalogProcessedIds = [...new Set([...run.catalogProcessedIds, id])];
             await acceptManualRecords(run, [{ id }], [stored]);
@@ -605,6 +610,8 @@ async function syncCloudCatalogItems(records, { required = true, onAccepted, tab
     const id = String(record?.id ?? '');
     if (!/^\d{1,20}$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0) throw new Error('Shared catalog record has an invalid image ID.');
     const prior = uniqueRecords.get(id) || {}, merged = { ...prior, ...record, id };
+    const capturedPageUrl = ISSSourceReactions.capturedPageUrl(id, prior.capturedPageUrl) || ISSSourceReactions.capturedPageUrl(id, record.capturedPageUrl);
+    if (capturedPageUrl) { merged.capturedPageUrl = capturedPageUrl; merged.pageUrl = capturedPageUrl; }
     for (const key of ['prompt', 'negativePrompt', 'modelName', 'creatorName', 'downloadUrl', 'sourceUrl']) if (!String(merged[key] || '').trim() && prior[key]) merged[key] = prior[key];
     for (const key of ['tags', 'loras']) if ((!Array.isArray(merged[key]) || !merged[key].length) && prior[key]) merged[key] = prior[key];
     merged.reactions = { ...(prior.reactions || {}), ...(record.reactions || {}) }; uniqueRecords.set(id, merged);
@@ -614,8 +621,11 @@ async function syncCloudCatalogItems(records, { required = true, onAccepted, tab
     let entry = preparedUploads.get(record.id);
     const fresh = !entry;
     if (!entry) { entry = { record, subscribers: new Set(), uploading: false, checking: true }; preparedUploads.set(record.id, entry); }
-    else if (!entry.uploading && !entry.selected) entry.record = { ...entry.record, ...record,
-      creatorName: record.creatorName || entry.record.creatorName || '' };
+    else if (!entry.uploading && !entry.selected) {
+      const capturedPageUrl = ISSSourceReactions.capturedPageUrl(record.id, entry.record.capturedPageUrl) || ISSSourceReactions.capturedPageUrl(record.id, record.capturedPageUrl);
+      entry.record = { ...entry.record, ...record, creatorName: record.creatorName || entry.record.creatorName || '',
+        ...(capturedPageUrl ? { capturedPageUrl, pageUrl: capturedPageUrl } : {}) };
+    }
     entry.subscribers.add({ tabId, isCurrent, onAccepted, resolve, reject });
     if (fresh) checkPreparedUpload(entry);
     else if (!entry.checking) scheduleUploadFlush();
@@ -647,7 +657,8 @@ async function checkPreparedUpload(entry) {
     if (!await liveSubscribers(entry)) return;
     entry.storageItem = stored;
     if (stored.exists) {
-      if (stored.downloadStatus !== 'skipped') observeSourceReactions(entry.record.id, entry.record.reactions, entry.record.creatorName);
+      if (stored.downloadStatus !== 'skipped') observeSourceReactions(entry.record.id, entry.record.reactions, entry.record.creatorName,
+        stored.sourcePageMissing === false ? '' : entry.record.capturedPageUrl);
       await completePreparedUpload(entry, stored);
     }
   } catch (error) {
@@ -773,7 +784,9 @@ const autoBrowseCollector = ISSBrowseCollector.create({
   metadata: (entry, procedure, isCurrent) => ISSFeed.civitaiMetadata({ pageUrl: entry.pageUrl }, procedure, entry.card.id,
     url => requestCivitaiFeed(entry.tabId, url, entry.pageUrl, isCurrent)),
   deferReactions: entry => deferReactionPage(entry.card.id, entry.tabId, entry.pageUrl),
-  record: (image, enrichment) => ISSFeed.civitaiCatalogRecord(image, {}, enrichment),
+  record: (image, enrichment, capturedPageUrl) => ISSFeed.civitaiCatalogRecord(image, {}, enrichment, capturedPageUrl),
+  capturePage: (id, capturedPageUrl) => ISSFeed.imagePageUrl(id, capturedPageUrl),
+  validCapture: (id, capturedPageUrl) => ISSSourceReactions.capturedPageUrl(id, capturedPageUrl),
   oversize: image => ISSFeed.imageExceedsLimits(image),
   discardOversizeReactions,
   upsert: records => PromptCatalogDB.upsert(records), existing: id => PromptCatalogDB.get(id),

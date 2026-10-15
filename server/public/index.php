@@ -11,7 +11,7 @@ header('X-Frame-Options: DENY');
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Search the community Civitai image library by prompt, tags, model, LoRA, or creator, and sort by Civitai reactions.">
   <title>Search Civitai · Community image library</title>
-  <link rel="stylesheet" href="style.css?v=filters-v1">
+  <link rel="stylesheet" href="style.css?v=creator-links-v1">
 </head>
 <body>
   <header class="topbar">
@@ -23,7 +23,7 @@ header('X-Frame-Options: DENY');
       <label class="sr-only" for="qMode">Combine search words</label><select id="qMode" class="query-mode" title="Choose whether every word or any word must match"><option value="all">All words (AND)</option><option value="any">Any word (OR)</option></select>
       <button class="search-submit" type="submit" aria-label="Search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path></svg></button>
     </form>
-    <a class="extension-link" href="/downloads/index-civitai-2.8.13.zip" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"></path></svg><span>Index Civitai</span></a>
+    <a class="extension-link" href="/downloads/index-civitai-2.8.14.zip" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"></path></svg><span>Index Civitai</span></a>
   </header>
   <div class="browsebar">
     <div class="browse-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8" cy="8" r="1.5"></circle><path d="m3 17 6-6 5 5 3-3 4 4"></path></svg><b>Images</b><span>Community library</span></div>
@@ -60,13 +60,13 @@ header('X-Frame-Options: DENY');
     </section>
     <section id="results" class="results" aria-label="Matching images" aria-busy="true"></section>
     <nav id="pagination" class="pagination" aria-label="Search result pages"></nav>
-    <footer><span>Search Civitai · A community prompt library</span><span>Search covers indexed images. Copies may still be processing.</span><a href="/extension.php">Extension guide</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="/?preview=layout">Layout preview</a><a href="/downloads/index-civitai-2.8.13.zip" download>Index Civitai 2.8.13</a></footer>
+    <footer><span>Search Civitai · A community prompt library</span><span>Search covers indexed images. Copies may still be processing.</span><a href="/extension.php">Extension guide</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="/?preview=layout">Layout preview</a><a href="/downloads/index-civitai-2.8.14.zip" download>Index Civitai 2.8.14</a></footer>
   </main>
   <dialog id="imageViewer" class="image-viewer" aria-labelledby="viewerTitle">
     <div class="viewer-toolbar"><div class="viewer-toolbar-left"><button id="closeViewer" type="button" class="icon-button" aria-label="Close image viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button><span id="viewerPosition"></span></div><div class="viewer-actions"><a id="viewerSource" class="viewer-source" href="#" target="_blank" rel="noopener noreferrer">Open on Civitai ↗</a><a id="viewerDownload" class="viewer-download" href="#" download>Download original</a></div></div>
     <div class="viewer-layout"><div class="viewer-stage"><button id="viewerPrev" class="viewer-arrow viewer-prev" type="button" aria-label="Previous image">‹</button><div id="viewerMedia" class="viewer-media"></div><button id="viewerNext" class="viewer-arrow viewer-next" type="button" aria-label="Next image">›</button><section id="viewerReactions" class="viewer-reactions" aria-label="Community reactions"></section></div><aside id="viewerDetails" class="viewer-details"></aside></div>
     <span id="viewerStatus" class="viewer-status" role="status" aria-live="polite"></span>
   </dialog>
-  <script src="app.js?v=model-search-v1"></script>
+  <script src="app.js?v=creator-links-v1"></script>
 </body>
 </html>

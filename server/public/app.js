@@ -8,7 +8,7 @@
   const reactionTypes = [['likeCount', '👍', 'likes'], ['heartCount', '❤️', 'hearts'], ['laughCount', '😂', 'laughs'], ['cryCount', '😭', 'cries'], ['buzzCount', '⚡', 'Buzz']];
   const communityTypes = [['upvote', '↑', 'Upvote'], ['heart', '❤️', 'Love'], ['laugh', '😂', 'Laugh'], ['wow', '😮', 'Wow']];
   const layoutPreview = new URL(location.href).searchParams.get('preview') === 'layout';
-  const defaultFilters = { q: '', qMode: 'all', tag: '', tagMode: 'all', tagMatch: 'list', model: '', lora: '', creator: '', category: '', sort: 'newest' };
+  const defaultFilters = { q: '', qMode: 'all', tag: '', tagMode: 'all', tagMatch: 'list', model: '', lora: '', creator: '', creatorMatch: 'contains', category: '', sort: 'newest' };
   const filterControls = { q: 'query', qMode: 'qMode', tag: 'tag', tagMode: 'tagMode', model: 'model', lora: 'lora', creator: 'creator', category: 'category', sort: 'sort' };
   const state = { page: 1, pages: 1, limit: layoutPreview ? 48 : 42, total: 0, items: [], filters: { ...defaultFilters }, pendingFilters: null, request: 0, controller: null, viewerIndex: -1, viewerBusy: false, returnFocus: null, reactionRequest: 0, reactionController: null, community: null };
   const reactionWrites = new Map();
@@ -21,7 +21,49 @@
       return url.href;
     } catch { return ''; }
   }
-  function sourceUrl(id) { return `https://civitai.red/images/${encodeURIComponent(id)}`; }
+  function capturedOrigin(row) {
+    return ['https://civitai.red', 'https://civitai.com'].includes(row.sourceOrigin) ? row.sourceOrigin : '';
+  }
+  function sourceUrl(row) { return `${capturedOrigin(row) || 'https://civitai.red'}/images/${encodeURIComponent(row.id)}`; }
+  function creatorLibraryUrl(name) {
+    const url = new URL('./', location.href);
+    url.search = new URLSearchParams({ creator: name, creatorMatch: 'exact', sort: state.filters.sort }).toString();
+    url.hash = '';
+    return url.href;
+  }
+  function creatorProfileUrl(name, origin) {
+    return ['https://civitai.red', 'https://civitai.com'].includes(origin) ? `${origin}/user/${encodeURIComponent(name)}/images` : '';
+  }
+  function creatorMarkup(row) {
+    const name = String(row.creatorName || '').trim().replace(/^@+/, '');
+    if (!name) return '<p class="creator-missing">Creator not yet indexed.</p>';
+    const origin = capturedOrigin(row), profile = creatorProfileUrl(name, origin);
+    return `<div class="creator-card"><button type="button" class="creator-search" data-open-creator title="Open the creator profile and indexed images in two new tabs"><span>Creator</span><b>@${esc(name)}</b><span aria-hidden="true">↗</span></button><p class="creator-link-note">Open profile + indexed images in two tabs.</p>${origin ? '' : '<label class="creator-domain-label" for="creatorDomain">Profile site<select id="creatorDomain"><option value="">Choose .red or .com</option><option value="https://civitai.red">civitai.red</option><option value="https://civitai.com">civitai.com</option></select></label><p class="creator-link-note">The original site was not saved for this older image.</p>'}<div class="creator-links"><a id="creatorProfileLink"${profile ? ` href="${esc(profile)}"` : ' hidden'} target="_blank" rel="noopener noreferrer">${origin === 'https://civitai.com' ? 'Civitai.com' : 'Civitai.red'} profile ↗</a><a href="${esc(creatorLibraryUrl(name))}" target="_blank" rel="noopener noreferrer">Indexed images ↗</a></div><p id="creatorFeedback" class="creator-link-note" role="status" aria-live="polite"></p></div>`;
+  }
+  function openCreatorPages() {
+    const row = state.items[state.viewerIndex];
+    if (!row) return;
+    const name = String(row.creatorName || '').trim().replace(/^@+/, '');
+    if (!name) return;
+    const origin = capturedOrigin(row) || $('creatorDomain')?.value;
+    const profile = creatorProfileUrl(name, origin);
+    if (!profile) {
+      $('creatorFeedback').textContent = 'Choose the Civitai site below, then click the username.';
+      $('creatorDomain')?.focus();
+      return;
+    }
+    let opened = 0;
+    for (const url of [profile, creatorLibraryUrl(name)]) {
+      try {
+        const tab = window.open('about:blank', '_blank');
+        if (!tab) continue;
+        tab.opener = null;
+        tab.location.replace(url);
+        opened++;
+      } catch { /* The individual links remain usable when a browser blocks a tab. */ }
+    }
+    $('creatorFeedback').textContent = opened === 2 ? 'Opened the Civitai profile and indexed images.' : 'Your browser blocked a new tab. Use the two links above, or allow pop-ups for this site.';
+  }
   function dimensions(row) {
     const width = Math.trunc(number(row.width)), height = Math.trunc(number(row.height));
     return width > 0 && height > 0 && width <= 100000 && height <= 100000 ? ` width="${width}" height="${height}"` : '';
@@ -40,7 +82,7 @@
     const preview = mediaUrl(row.previewUrl, row.id);
     const label = `View image ${row.id}${row.modelName ? ` · ${row.modelName}` : ''}`;
     const image = preview ? `<img src="${esc(preview)}"${dimensions(row)} loading="lazy" decoding="async" alt="Indexed image ${esc(row.id)}">` : `<span class="image-fallback"><span class="fallback-symbol" aria-hidden="true">▧</span><b>${esc(statusText(row))}</b><small>Prompt and details are available</small></span>`;
-    return `<article class="image-card"><div class="card-media"><button type="button" class="gallery-open" data-index="${index}" aria-label="${esc(label)}">${image}</button><a class="source-link" href="${esc(sourceUrl(row.id))}" target="_blank" rel="noopener noreferrer" aria-label="Open image ${esc(row.id)} on Civitai" title="Open on Civitai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l2-2"></path></svg></a><span class="image-category category-${esc(row.category || 'uncertain')}">${esc(styleNames[row.category] || 'Uncertain')}</span></div><div class="reaction-strip"><span class="card-community-upvotes" data-community-id="${esc(row.id)}" title="${format(row.communityReactions?.upvote)} community upvotes on Search Civitai" aria-label="${format(row.communityReactions?.upvote)} community upvotes"><span aria-hidden="true">↑</span><b>${format(row.communityReactions?.upvote)}</b></span><span class="card-source-reactions" aria-label="Read-only Civitai source reactions">${reactionMarkup(row)}</span></div></article>`;
+    return `<article class="image-card"><div class="card-media"><button type="button" class="gallery-open" data-index="${index}" aria-label="${esc(label)}">${image}</button><a class="source-link" href="${esc(sourceUrl(row))}" target="_blank" rel="noopener noreferrer" aria-label="Open image ${esc(row.id)} on Civitai" title="Open on Civitai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l2-2"></path></svg></a><span class="image-category category-${esc(row.category || 'uncertain')}">${esc(styleNames[row.category] || 'Uncertain')}</span></div><div class="reaction-strip"><span class="card-community-upvotes" data-community-id="${esc(row.id)}" title="${format(row.communityReactions?.upvote)} community upvotes on Search Civitai" aria-label="${format(row.communityReactions?.upvote)} community upvotes"><span aria-hidden="true">↑</span><b>${format(row.communityReactions?.upvote)}</b></span><span class="card-source-reactions" aria-label="Read-only Civitai source reactions">${reactionMarkup(row)}</span></div></article>`;
   }
   function markImageErrors(root) {
     root.querySelectorAll('img').forEach(img => img.addEventListener('error', () => {
@@ -53,19 +95,21 @@
   function currentFilters() {
     const tag = $('tag').value.trim();
     const exactTag = tag !== '' && $('tag').dataset.exactTag === tag;
+    const creator = $('creator').value.trim().replace(/^@+/, '');
     return {
       q: $('query').value.trim(), qMode: $('qMode').value === 'any' ? 'any' : 'all',
       tag: exactTag ? tag : tag.split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean).join(', '),
       tagMatch: exactTag ? 'exact' : 'list',
       model: $('model').value.trim(),
       tagMode: $('tagMode').value === 'any' ? 'any' : 'all', lora: $('lora').value.trim(),
-      creator: $('creator').value.trim().replace(/^@+/, ''), category: $('category').value,
+      creator, creatorMatch: creator && $('creator').dataset.exactCreator === creator ? 'exact' : 'contains', category: $('category').value,
       sort: ['upvotes', 'civitai_reactions'].includes($('sort').value) ? $('sort').value : 'newest'
     };
   }
   function setControls(filters) {
     Object.entries(filterControls).forEach(([key, id]) => { $(id).value = filters[key] ?? defaultFilters[key]; });
     $('tag').dataset.exactTag = filters.tagMatch === 'exact' ? filters.tag : '';
+    $('creator').dataset.exactCreator = filters.creatorMatch === 'exact' ? filters.creator : '';
     syncTagHelp();
   }
   function syncTagHelp() {
@@ -290,7 +334,7 @@
     const absoluteIndex = (state.page - 1) * state.limit + state.viewerIndex;
     const original = mediaUrl(row.downloadUrl, row.id), preview = mediaUrl(row.previewUrl, row.id);
     $('viewerPosition').textContent = `${format(absoluteIndex + 1)} / ${format(state.total)}`;
-    $('viewerSource').href = sourceUrl(row.id);
+    $('viewerSource').href = sourceUrl(row);
     $('viewerDownload').hidden = !original;
     $('viewerDownload').href = original || '#';
     $('viewerDownload').setAttribute('download', `civitai-${row.id}`);
@@ -304,7 +348,7 @@
       button.title = label;
       button.setAttribute('aria-label', label);
     });
-    if (row.creatorName) $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('beforeend', `<button type="button" class="creator-search" data-creator="${esc(row.creatorName)}" title="Find images by this creator"><span>Creator</span><b>@${esc(String(row.creatorName).replace(/^@+/, ''))}</b><span aria-hidden="true">↗</span></button>`);
+    $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('beforeend', creatorMarkup(row));
     $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('afterend', `<section class="detail-section source-reaction-section"><div class="detail-heading"><h2>Civitai source reactions</h2><span class="read-only-label">Read-only</span></div><div class="source-reaction-values">${reactionMarkup(row, true)}</div><p>Captured when indexed. Your community reactions are counted separately on this site.</p></section>`);
     $('viewerPrev').disabled = state.viewerBusy || absoluteIndex <= 0;
     $('viewerNext').disabled = state.viewerBusy || absoluteIndex >= state.total - 1;
@@ -360,6 +404,7 @@
   $('searchForm').addEventListener('submit', event => { event.preventDefault(); search(); });
   $('applyFilters').addEventListener('click', applyFilters);
   $('tag').addEventListener('input', () => { delete $('tag').dataset.exactTag; syncTagHelp(); });
+  $('creator').addEventListener('input', () => { delete $('creator').dataset.exactCreator; });
   ['tag', 'model', 'lora', 'creator'].forEach(id => $(id).addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); applyFilters(); } }));
   $('qMode').addEventListener('change', search);
   $('sort').addEventListener('change', () => searchRelated('sort', $('sort').value));
@@ -391,8 +436,7 @@
     if (model) { searchAllBy('model', model.dataset.model); return; }
     const lora = event.target.closest('[data-lora]');
     if (lora) { searchRelated('lora', lora.dataset.lora); return; }
-    const creator = event.target.closest('[data-creator]');
-    if (creator) { searchRelated('creator', creator.dataset.creator); return; }
+    if (event.target.closest('[data-open-creator]')) { openCreatorPages(); return; }
     const copy = event.target.closest('#copyPrompt'); if (!copy) return;
     try { await navigator.clipboard.writeText(state.items[state.viewerIndex]?.prompt || ''); copy.textContent = 'Copied'; }
     catch { copy.textContent = 'Copy unavailable'; }
@@ -402,6 +446,26 @@
     if (button && !button.disabled) toggleCommunityReaction(button.dataset.reaction);
     else if (event.target.closest('#retryReactions')) loadCommunityReactions();
   });
+  $('viewerDetails').addEventListener('change', event => {
+    if (event.target.id !== 'creatorDomain') return;
+    const row = state.items[state.viewerIndex];
+    if (!row) return;
+    const url = creatorProfileUrl(String(row.creatorName || '').trim().replace(/^@+/, ''), event.target.value);
+    const link = $('creatorProfileLink');
+    link.hidden = !url;
+    if (url) { link.href = url; link.textContent = `${event.target.value.endsWith('.com') ? 'Civitai.com' : 'Civitai.red'} profile ↗`; }
+    else link.removeAttribute('href');
+    $('creatorFeedback').textContent = '';
+  });
   $('layoutPreview').hidden = !layoutPreview;
-  loadHealth(); loadPage();
+  const params = new URL(location.href).searchParams;
+  const creator = String(params.get('creator') || '').trim().replace(/^@+/, '');
+  const initialFilters = { ...defaultFilters };
+  if (creator && [...creator].length <= 200 && !creator.includes('\0')) {
+    initialFilters.creator = creator;
+    initialFilters.creatorMatch = params.get('creatorMatch') === 'exact' ? 'exact' : 'contains';
+    if (['newest', 'upvotes', 'civitai_reactions'].includes(params.get('sort'))) initialFilters.sort = params.get('sort');
+  }
+  setControls(initialFilters);
+  loadHealth(); loadPage(1, { filters: initialFilters });
 })();

@@ -1,6 +1,6 @@
 # Server deployment guide
 
-Index Civitai 2.8.13 consists of a browser extension and a PHP catalog/image worker. The public shared library is https://search-civitai.xyz/. The domain and paths below are deployment examples; substitute your own values for an independent installation.
+Index Civitai 2.8.14 consists of a browser extension and a PHP catalog/image worker. The public shared library is https://search-civitai.xyz/. The domain and paths below are deployment examples; substitute your own values for an independent installation.
 
 ## Requirements and installation
 
@@ -52,7 +52,7 @@ Configure certificate renewal and application log rotation for your environment.
 
 ## Extension connection
 
-Index Civitai 2.8.13 connects only to https://search-civitai.xyz/api.php. Everyone can read, search, check storage, and submit discovered image metadata without a key or account. The extension does not carry SSH credentials, SSH access, image bytes, or permission to download files to the computer. The server worker fetches approved Civitai image URLs into /data/civitai/media. No connection setup or credential sharing is required.
+Index Civitai 2.8.14 connects only to https://search-civitai.xyz/api.php. Everyone can read, search, check storage, and submit discovered image metadata without a key or account. The extension does not carry SSH credentials, SSH access, image bytes, or permission to download files to the computer. The server worker fetches approved Civitai image URLs into /data/civitai/media. No connection setup or credential sharing is required.
 
 ## Public ingestion configuration
 
