@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Index Civitai",
+  "version": "2.8.10",
+  "description": "Anyone can index prompts while browsing Civitai. Images save on the shared server. No key, account, or local image downloads.",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "scripting",
+    "activeTab",
+    "tabs",
+    "offscreen",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://civitai.com/*", "https://civitai.red/*"],
+      "js": ["civitai-feed-capture.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://civitai.com/*", "https://civitai.red/*"],
+      "js": ["civitai-browse.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "Index Civitai"
+  },
+  "host_permissions": [
+    "https://search-civitai.xyz/*",
+    "https://civitai.red/*",
+    "https://civitai.com/*"
+  ]
+}

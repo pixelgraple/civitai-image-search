@@ -1,0 +1,34 @@
+<?php
+declare(strict_types=1);
+require dirname(__DIR__).'/lib.php';
+$checks=0;
+function check(bool $condition,string $message): void { global $checks; if(!$condition)throw new RuntimeException('FAIL: '.$message);$checks++; }
+$anime=classify_style('anime style, manga illustration','Checkpoint',[],[]);
+check($anime['category']==='anime','prompt anime signals');
+$photo=classify_style('a candid photo, realistic skin texture','Realistic Vision checkpoint',[],[]);
+check($photo['category']==='realistic','prompt and model realism signals');
+$lora=classify_style('portrait','Base checkpoint',['anime portrait LoRA'],[]);
+check($lora['category']==='anime','LoRA classification signal');
+$mixed=classify_style('anime photorealistic','',[],[]);
+check($mixed['category']==='uncertain','conflicting signals remain uncertain');
+check(safe_image_url('https://image.civitai.com/a/b/original=true/a.png')!==null,'Civitai image host accepted');
+check(safe_image_url('https://imagecache.civitai.com/a/b/original=true/a.webp')!==null,'Civitai imagecache host accepted');
+check(safe_image_url('https://blobs-b2.civitai.com/file/image.jpg')!==null,'Civitai redirected image CDN accepted');
+check(safe_image_url('http://image.civitai.com/a.png')===null,'non-TLS rejected');
+check(safe_image_url('https://evil.example/image.png')===null,'untrusted host rejected');
+check(safe_image_url('https://user@image.civitai.com/image.png')===null,'userinfo URL rejected');
+check(safe_image_url('https://image.civitai.com:443/image.png')===null,'explicit port rejected');
+check(valid_image_id('135960467') && valid_image_id(42),'string and integer image IDs accepted');
+check(!valid_image_id('0') && !valid_image_id('001') && !valid_image_id('1/../2') && !valid_image_id(1.5),'malformed image IDs rejected before file locking');
+check(has_positive_prompt('selfie') && !has_positive_prompt(" \n\t\u{00A0}"),'blank Unicode whitespace does not count as a positive prompt');
+check(thumbnail_path('/private/123.jpg')==='/private/123-thumb.jpg','thumbnail path derives from original');
+check(!inspect_stored_image(['file_path'=>'/etc/passwd'])['exists'],'storage verification rejects files outside media root');
+check(check_image_storage(db(),null,'42')===['imageId'=>'42','exists'=>false,'sha256'=>'','downloadStatus'=>'unknown','needsDownload'=>true],'unknown IDs need a copy without creating a row');
+$pdo=db();
+$pdo->prepare('DELETE FROM images_fts WHERE image_id=?')->execute(['989898']);
+$pdo->prepare('DELETE FROM images WHERE image_id=?')->execute(['989898']);
+$pdo->exec("INSERT INTO images(image_id,source_url,prompt,tags_json,style_category,discovered_at,updated_at) VALUES('989898','https://image.civitai.com/a/b/a.png','smokefixturespecial','[\"smokefixturespecial\"]','realistic','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')");
+$pdo->exec("INSERT INTO images_fts(image_id,prompt,negative_prompt,tags,model_name,lora_names) VALUES('989898','smokefixturespecial','','smokefixturespecial','','')");
+$stmt=$pdo->query("SELECT image_id FROM images_fts WHERE images_fts MATCH '\"smokefixturespecial\"*'");
+check($stmt->fetchColumn()==='989898','FTS finds a prompt/tag term');
+fwrite(STDOUT,"PASS {$checks} backend smoke checks\n");

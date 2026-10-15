@@ -1,0 +1,37 @@
+# Private server configuration and credentials
+.env
+.env.*
+!.env.example
+config.local.php
+config.php
+contributors.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Catalogs, downloaded media, runtime state and local caches
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+*.part
+*.tmp
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
+Thumbs.db
+/server/public/downloads/
+/server/config/
+/server/database/
+/server/media/
+/server/logs/
+/data/
+/media/
+/backups/
+/work/
+/outputs/
+/dist/
+*.zip
