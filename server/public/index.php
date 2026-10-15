@@ -5,15 +5,17 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 ?>
 <!doctype html>
-<html lang="en">
+<html lang="en" class="access-locked">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Search the community Civitai image library by prompt, tags, model, LoRA, or creator, and sort by Civitai reactions.">
   <title>Search Civitai · Community image library</title>
   <link rel="stylesheet" href="style.css?v=contributor-guide-v1">
+  <link rel="stylesheet" href="access-gate.css?v=captcha1">
 </head>
 <body>
+  <div id="libraryShell" inert aria-hidden="true">
   <header class="topbar">
     <a class="brand" href="/" aria-label="Search Civitai home"><span>SEARCH<span class="brand-accent">CIVITAI</span></span><span class="brand-domain">XYZ</span></a>
     <form id="searchForm" class="search" role="search">
@@ -58,7 +60,7 @@ header('X-Frame-Options: DENY');
       <div class="resultbar"><span id="resultCount" role="status" aria-live="polite" tabindex="-1">Loading images…</span><label class="sort-control" for="sort"><span>Sort</span><select id="sort" aria-describedby="sortHelp"><option value="newest">Newest</option><option value="civitai_reactions">Most Civitai reactions</option><option value="upvotes">Community upvotes</option></select></label></div>
       <div id="searchContext" class="search-context" hidden><div id="activeFilters" class="active-filters" aria-label="Applied search filters"></div><p id="sortHelp" class="sort-help" hidden>Sorted by captured Civitai likes, hearts, laughs and cries combined. Incomplete counts appear last. Buzz and this site's community votes are excluded.</p></div>
     </section>
-    <section id="results" class="results" aria-label="Matching images" aria-busy="true"></section>
+    <section id="results" class="results" aria-label="Matching images" aria-busy="true"><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div></section>
     <nav id="pagination" class="pagination" aria-label="Search result pages"></nav>
     <footer><span>Search Civitai · A community prompt library</span><span>Search covers indexed images. Copies may still be processing.</span><a href="/guide.php">Contributor guide</a><a href="/extension.php">Install extension</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="/?preview=layout">Layout preview</a><a href="/downloads/index-civitai-2.8.18.zip" download>Index Civitai 2.8.18</a></footer>
   </main>
@@ -67,6 +69,21 @@ header('X-Frame-Options: DENY');
     <div class="viewer-layout"><div class="viewer-stage"><button id="viewerPrev" class="viewer-arrow viewer-prev" type="button" aria-label="Previous image">‹</button><div id="viewerMedia" class="viewer-media"></div><button id="viewerNext" class="viewer-arrow viewer-next" type="button" aria-label="Next image">›</button><section id="viewerReactions" class="viewer-reactions" aria-label="Community reactions"></section></div><aside id="viewerDetails" class="viewer-details"></aside></div>
     <span id="viewerStatus" class="viewer-status" role="status" aria-live="polite"></span>
   </dialog>
-  <script src="app.js?v=creator-links-v1"></script>
+  </div>
+  <section id="accessPreloader" class="access-preloader" role="status" aria-live="polite" aria-label="Preparing the library"><div class="access-loading"><strong>SEARCH<span>CIVITAI</span></strong><span class="access-spinner" aria-hidden="true"></span><p>Preparing your library…</p></div></section>
+  <dialog id="accessDialog" class="access-dialog" aria-labelledby="accessTitle" aria-describedby="accessDescription">
+    <div class="access-card"><p class="access-eyebrow">Search Civitai · Community library</p><span class="access-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 4 8 8 10 4-2 8-5 8-10V6l-8-3Z"></path><path d="m8 12 3 3 5-6"></path></svg></span><h1 id="accessTitle" tabindex="-1">One quick check.</h1><p id="accessDescription" class="access-description">A quick check before you explore the image library.</p>
+      <form id="accessForm" novalidate>
+        <div class="access-image-box"><img id="accessImage" alt="Verification code: six characters" width="360" height="112" hidden><span id="accessImagePlaceholder" class="access-image-placeholder">Preparing your code…</span></div>
+        <div class="access-code-tools"><span>Enter the six characters shown</span><button id="accessRefresh" class="access-refresh" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 3M18 18a8 8 0 0 1-13-3"></path></svg>New code</button></div>
+        <label for="accessAnswer">Verification code</label><input id="accessAnswer" class="access-answer" type="text" maxlength="6" minlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="••••••" aria-describedby="accessMessage" disabled>
+        <button id="accessSubmit" class="access-submit" type="submit" disabled>Enter the library</button><p id="accessMessage" class="access-message" role="status" aria-live="polite"></p><button id="accessRetry" class="access-retry" type="button" hidden>Try again</button>
+      </form>
+      <p class="access-note"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span>One check unlocks the library for one hour in this browser.</span></p>
+    </div>
+  </dialog>
+  <noscript><div class="access-noscript"><h1>JavaScript is needed to continue.</h1><p>Enable JavaScript and reload this page to complete verification and open the image library.</p><a href="/guide.php">Read the contributor guide</a></div></noscript>
+  <script src="access-gate.js?v=captcha1" defer></script>
+  <script src="app.js?v=captcha1" defer></script>
 </body>
 </html>

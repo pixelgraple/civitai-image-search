@@ -28,6 +28,14 @@ Copy `config.example.php` to `/data/civitai/config/config.php` and review its va
 
 Configure HTTPS and serve only `public/`. The parent application contains CLI/source files and must stay outside the served root, as must all configuration, databases, media storage and backups. Configure certificates and renewal using the tools supported by your server.
 
+## Website CAPTCHA and preloader
+
+Deploy `access-gate.php` outside the public root, plus `public/access.php`, `public/access-gate.js` and `public/access-gate.css` with the updated index, app, API and media handlers. Add `access.php` and `guide.php` to the existing Nginx PHP filename allowlist; keep arbitrary PHP paths blocked. The gate uses the dedicated pool's private writable temporary/database directories, which must be included in `open_basedir`.
+
+Verified access lasts one fixed hour in a Secure, HttpOnly session cookie, shared by tabs in that browser session. Browser session restoration may preserve session cookies, but the server still enforces the one-hour expiry. Search, community reactions and media require verification; media responses are private and must revalidate before cache reuse. Do not configure a CDN or reverse proxy to cache these responses publicly. Public extension ingestion, preflight checks, health and transfer-status endpoints remain independent so unattended scans continue.
+
+The guide and extension installation/download pages stay public. Do not add CAPTCHA enforcement to contributor endpoints or embed a bypass credential in the extension.
+
 ## PHP and worker
 
 Run the dedicated PHP 8.4 pool and image worker as the non-login civitai-library account, using CIVITAI_LIBRARY_CONFIG=/data/civitai/config/config.php. Use a dedicated local PHP-FPM socket, for example `/run/php/civitai-library.sock`, and configure Nginx to use it. Restrict the pool to the application plus private configuration and runtime directories, ignore inherited `.user.ini` files, and write errors beneath the data root. Disable shell/process functions, FFI, raw file uploads and URL fopen in the web pool; the CLI worker needs separate settings for its bounded thumbnail subprocess. Keep code and configuration unwritable to the service. Forward the Authorization header explicitly for optional protected mode. For a systemd worker, use `ProtectSystem=strict` and grant write access only to required runtime directories under `/data/civitai/`.

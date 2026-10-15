@@ -2,6 +2,15 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## Website access gate — 2026-10-15
+
+- Show a short preloader followed by an SVG CAPTCHA before loading the library.
+- Keep the page blurred and inactive until verification succeeds. One verification unlocks the browser session for one fixed hour, shared by its tabs.
+- Enforce the gate on catalog search, community reactions and image delivery. Close and clear the image viewer when access expires.
+- Keep extension ingestion, duplicate checks, transfer status, installation instructions and the contributor guide available independently.
+- Store CAPTCHA state privately on the server, limit challenge/answer attempts and prevent shared caching of gated media.
+- The browser extension remains at version 2.8.18.
+
 ## 2.8.18
 
 - Auto-scroll only explicitly started scan tabs whose current page still matches the selected feed. Other Civitai browsing tabs retain manual scrolling.

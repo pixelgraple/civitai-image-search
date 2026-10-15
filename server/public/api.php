@@ -2,12 +2,16 @@
 declare(strict_types=1);
 require dirname(__DIR__) . '/lib.php';
 $action = is_string($_GET['action']??null) ? $_GET['action'] : '';
-// Anonymous browser identity and CSRF responses must never inherit ingestion's wildcard CORS.
-if ($action !== 'reactions') {
+// Session-gated browsing must never inherit ingestion's wildcard CORS.
+if (!in_array($action, ['reactions', 'search'], true)) {
     cors_headers();
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 }
 try {
+    if (in_array($action, ['search', 'reactions'], true)) {
+        require_once dirname(__DIR__) . '/access-gate.php';
+        gate_require_verified();
+    }
     if ($action === 'reactions') {
         require dirname(__DIR__) . '/reactions.php';
         community_reactions_request();

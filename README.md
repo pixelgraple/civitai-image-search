@@ -6,7 +6,7 @@ Civitai Image Search combines **Index Civitai**, a browser extension, with a sha
 
 **[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.18](https://search-civitai.xyz/downloads/index-civitai-2.8.18.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.18)**
 
-The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Public browsing and contribution require no account or contributor key.
+The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Browsing requires a short SVG CAPTCHA after the preloader; a successful answer unlocks that browser session for one hour across its tabs. No account or contributor key is needed. Extension contributions continue independently of the website CAPTCHA.
 
 ## What it can do
 

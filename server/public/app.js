@@ -1,6 +1,11 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
+  const access = window.CivitaiAccess;
+  if (!access) return;
+  const protectedFetch = (url, options) => access.fetch(url, options);
+  const skeletonMarkup = $('results').innerHTML;
+  let libraryStarted = false;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const number = value => Math.max(0, Number(value) || 0);
   const format = value => number(value).toLocaleString();
@@ -18,6 +23,7 @@
     try {
       const url = new URL(String(value), location.href);
       if (url.origin !== location.origin || !url.pathname.endsWith('/media.php') || url.searchParams.get('id') !== String(id)) return '';
+      url.searchParams.set('av', 'captcha1');
       return url.href;
     } catch { return ''; }
   }
@@ -42,7 +48,7 @@
   }
   function openCreatorPages() {
     const row = state.items[state.viewerIndex];
-    if (!row) return;
+    if (!access.isVerified() || !row) return;
     const name = String(row.creatorName || '').trim().replace(/^@+/, '');
     if (!name) return;
     const origin = capturedOrigin(row) || $('creatorDomain')?.value;
@@ -85,7 +91,9 @@
     return `<article class="image-card"><div class="card-media"><button type="button" class="gallery-open" data-index="${index}" aria-label="${esc(label)}">${image}</button><a class="source-link" href="${esc(sourceUrl(row))}" target="_blank" rel="noopener noreferrer" aria-label="Open image ${esc(row.id)} on Civitai" title="Open on Civitai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l2-2"></path></svg></a><span class="image-category category-${esc(row.category || 'uncertain')}">${esc(styleNames[row.category] || 'Uncertain')}</span></div><div class="reaction-strip"><span class="card-community-upvotes" data-community-id="${esc(row.id)}" title="${format(row.communityReactions?.upvote)} community upvotes on Search Civitai" aria-label="${format(row.communityReactions?.upvote)} community upvotes"><span aria-hidden="true">↑</span><b>${format(row.communityReactions?.upvote)}</b></span><span class="card-source-reactions" aria-label="Read-only Civitai source reactions">${reactionMarkup(row)}</span></div></article>`;
   }
   function markImageErrors(root) {
-    root.querySelectorAll('img').forEach(img => img.addEventListener('error', () => {
+    root.querySelectorAll('img').forEach(img => img.addEventListener('error', async () => {
+      await access.refresh();
+      if (!access.isVerified() || !img.isConnected) return;
       const fallback = document.createElement('span');
       fallback.className = 'image-fallback';
       fallback.textContent = 'Image unavailable. Prompt and details are still available.';
@@ -162,6 +170,7 @@
     $('pagination').innerHTML = `<button type="button" class="page-direction" data-page="${state.page - 1}"${state.page <= 1 ? ' disabled' : ''}>‹ <span>Previous</span></button>${links}<button type="button" class="page-direction" data-page="${state.page + 1}"${state.page >= state.pages ? ' disabled' : ''}><span>Next</span> ›</button><span class="page-summary">Page ${format(state.page)} of ${format(state.pages)}</span>`;
   }
   async function loadPage(targetPage = 1, options = {}) {
+    if (!access.isVerified()) return false;
     const filters = options.filters ? { ...options.filters } : { ...state.filters };
     const request = ++state.request;
     state.controller?.abort();
@@ -173,14 +182,14 @@
     $('viewerStatus').textContent = options.keepViewer ? 'Loading the next page…' : '';
     const params = new URLSearchParams({ action: 'search', ...filters, page: String(Math.max(1, targetPage)), limit: String(state.limit) });
     try {
-      const response = await fetch(`api.php?${params}`, { headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal });
+      const response = await protectedFetch(`api.php?${params}`, { headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal });
       const data = await response.json();
       if (!response.ok || !data.ok || !Array.isArray(data.items)) {
         const error = new Error(data.error || `The search request failed (${response.status}).`);
         if (response.status === 400) error.name = 'SearchInputError';
         throw error;
       }
-      if (request !== state.request) return false;
+      if (request !== state.request || !access.isVerified()) return false;
       if (layoutPreview) {
         const sample = data.items.find(row => row.downloadStatus === 'ready' && mediaUrl(row.previewUrl, row.id));
         if (sample) {
@@ -205,7 +214,7 @@
       if (options.scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
       return true;
     } catch (error) {
-      if (error.name === 'AbortError' || request !== state.request) return false;
+      if (error.name === 'AbortError' || error.name === 'AccessRequiredError' || request !== state.request || !access.isVerified()) return false;
       if (options.keepViewer) { $('viewerStatus').textContent = error.message || 'Unable to load the next page.'; renderPagination(); }
       else {
         $('resultCount').textContent = error.name === 'SearchInputError' ? 'Adjust your search' : 'Search unavailable';
@@ -225,9 +234,10 @@
     return Object.fromEntries(communityTypes.map(([type]) => [type, Math.trunc(number(values?.[type]))]));
   }
   function currentCommunity(id, request) {
-    return request === state.reactionRequest && String(state.items[state.viewerIndex]?.id) === String(id) && state.community?.id === String(id);
+    return access.isVerified() && request === state.reactionRequest && String(state.items[state.viewerIndex]?.id) === String(id) && state.community?.id === String(id);
   }
   function updateCommunityCounts(id, counts) {
+    if (!access.isVerified()) return;
     const normalized = communityCounts(counts);
     state.items.forEach(row => { if (String(row.id) === String(id)) row.communityReactions = { ...normalized }; });
     $('results').querySelectorAll('[data-community-id]').forEach(badge => {
@@ -260,7 +270,7 @@
     const controller = options.controller || new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
     try {
-      const response = await fetch(`api.php?action=reactions&id=${encodeURIComponent(id)}`, {
+      const response = await protectedFetch(`api.php?action=reactions&id=${encodeURIComponent(id)}`, {
         method: options.body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
         headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
         ...(options.body ? { body: JSON.stringify(options.body) } : {})
@@ -274,7 +284,7 @@
     } finally { clearTimeout(timeout); }
   }
   async function loadCommunityReactions() {
-    const row = state.items[state.viewerIndex]; if (!row) return;
+    const row = state.items[state.viewerIndex]; if (!access.isVerified() || !row) return;
     const id = String(row.id), request = ++state.reactionRequest;
     state.reactionController?.abort();
     const controller = new AbortController(); state.reactionController = controller;
@@ -303,7 +313,7 @@
   }
   async function toggleCommunityReaction(type) {
     const community = state.community;
-    if (layoutPreview || !community || !community.loaded || community.loading || community.saving || !communityTypes.some(([key]) => key === type)) return;
+    if (!access.isVerified() || layoutPreview || !community || !community.loaded || community.loading || community.saving || !communityTypes.some(([key]) => key === type)) return;
     const id = community.id, request = state.reactionRequest, active = !Boolean(community.mine[type]);
     if (reactionWrites.has(id)) return;
     community.saving = true; community.error = ''; community.status = ''; updateCommunityControls();
@@ -330,7 +340,7 @@
     }
   }
   function renderViewer() {
-    const row = state.items[state.viewerIndex]; if (!row) return;
+    const row = state.items[state.viewerIndex]; if (!access.isVerified() || !row) return;
     const absoluteIndex = (state.page - 1) * state.limit + state.viewerIndex;
     const original = mediaUrl(row.downloadUrl, row.id), preview = mediaUrl(row.previewUrl, row.id);
     $('viewerPosition').textContent = `${format(absoluteIndex + 1)} / ${format(state.total)}`;
@@ -356,13 +366,13 @@
     $('viewerDetails').scrollTop = 0;
   }
   function openViewer(index, focus) {
-    if (!state.items[index]) return;
+    if (!access.isVerified() || !state.items[index]) return;
     state.viewerIndex = index; state.returnFocus = focus || document.activeElement; renderViewer();
     $('imageViewer').showModal(); document.body.classList.add('viewer-open'); $('closeViewer').focus();
   }
   function closeViewer() { if ($('imageViewer').open) $('imageViewer').close(); }
   async function navigateViewer(direction) {
-    if (state.viewerBusy || !$('imageViewer').open) return;
+    if (!access.isVerified() || state.viewerBusy || !$('imageViewer').open) return;
     const index = state.viewerIndex + direction;
     if (index >= 0 && index < state.items.length) { state.viewerIndex = index; renderViewer(); return; }
     const target = state.page + direction;
@@ -376,7 +386,7 @@
       $('viewerPrev').disabled = absoluteIndex <= 0; $('viewerNext').disabled = absoluteIndex >= state.total - 1;
     }
   }
-  function search() { closeViewer(); loadPage(1, { filters: currentFilters() }); }
+  function search() { if (!access.isVerified()) return; closeViewer(); loadPage(1, { filters: currentFilters() }); }
   function applyFilters() { $('filterPanel').open = false; search(); }
   function clearFilters() { setControls(defaultFilters); applyFilters(); }
   function searchRelated(key, value) {
@@ -395,11 +405,14 @@
     loadPage(1, { filters, scroll: true });
   }
   async function loadHealth() {
+    if (!access.isVerified()) return;
+    const ticket = access.generation;
     try {
-      const response = await fetch('api.php?action=health', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const response = await protectedFetch('api.php?action=health', { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const data = await response.json(); if (!response.ok || !data.ok) throw new Error('Health unavailable');
+      if (!access.isVerified() || ticket !== access.generation) return;
       $('health').textContent = `${format(data.counts?.total)} indexed · ${format(data.counts?.ready)} stored`;
-    } catch { $('health').textContent = 'Community image index'; }
+    } catch { if (access.isVerified() && ticket === access.generation) $('health').textContent = 'Community image index'; }
   }
   $('searchForm').addEventListener('submit', event => { event.preventDefault(); search(); });
   $('applyFilters').addEventListener('click', applyFilters);
@@ -423,7 +436,7 @@
   $('pagination').addEventListener('click', event => { const button = event.target.closest('[data-page]'); if (button && !button.disabled) loadPage(Number(button.dataset.page), { scroll: true }); });
   $('closeViewer').addEventListener('click', closeViewer);
   $('viewerPrev').addEventListener('click', () => navigateViewer(-1)); $('viewerNext').addEventListener('click', () => navigateViewer(1));
-  $('imageViewer').addEventListener('close', () => { document.body.classList.remove('viewer-open'); state.returnFocus?.focus(); state.viewerIndex = -1; state.reactionRequest++; state.reactionController?.abort(); state.community = null; });
+  $('imageViewer').addEventListener('close', () => { document.body.classList.remove('viewer-open'); if (access.isVerified()) state.returnFocus?.focus(); state.viewerIndex = -1; state.reactionRequest++; state.reactionController?.abort(); state.community = null; });
   $('imageViewer').addEventListener('click', event => { if (event.target === $('imageViewer')) closeViewer(); });
   $('imageViewer').addEventListener('keydown', event => {
     if (event.target.closest('input,textarea,select')) return;
@@ -437,7 +450,7 @@
     const lora = event.target.closest('[data-lora]');
     if (lora) { searchRelated('lora', lora.dataset.lora); return; }
     if (event.target.closest('[data-open-creator]')) { openCreatorPages(); return; }
-    const copy = event.target.closest('#copyPrompt'); if (!copy) return;
+    const copy = event.target.closest('#copyPrompt'); if (!copy || !access.isVerified()) return;
     try { await navigator.clipboard.writeText(state.items[state.viewerIndex]?.prompt || ''); copy.textContent = 'Copied'; }
     catch { copy.textContent = 'Copy unavailable'; }
   });
@@ -467,5 +480,23 @@
     if (['newest', 'upvotes', 'civitai_reactions'].includes(params.get('sort'))) initialFilters.sort = params.get('sort');
   }
   setControls(initialFilters);
-  loadHealth(); loadPage(1, { filters: initialFilters });
+  function loadUnlockedLibrary() {
+    if (!access.isVerified()) return;
+    const filters = libraryStarted ? currentFilters() : initialFilters;
+    libraryStarted = true; $('layoutPreview').hidden = !layoutPreview; loadHealth(); loadPage(1, { filters });
+  }
+  window.addEventListener('civitai-access-change', event => {
+    if (event.detail?.verified) { if (libraryStarted) loadUnlockedLibrary(); return; }
+    state.request++; state.reactionRequest++; state.controller?.abort(); state.reactionController?.abort();
+    state.returnFocus = null; closeViewer(); state.viewerIndex = -1; state.viewerBusy = false;
+    state.items = []; state.community = null; state.pendingFilters = null; state.total = 0; state.page = 1; state.pages = 1;
+    $('viewerMedia').replaceChildren(); $('viewerDetails').replaceChildren(); $('viewerReactions').replaceChildren();
+    $('viewerSource').href = '#'; $('viewerDownload').href = '#'; $('viewerDownload').hidden = true; $('viewerDownload').removeAttribute('download');
+    $('viewerPosition').textContent = ''; $('viewerStatus').textContent = '';
+    $('results').innerHTML = skeletonMarkup; $('results').classList.remove('is-empty'); $('results').setAttribute('aria-busy', 'true');
+    $('pagination').replaceChildren(); $('health').textContent = 'Community image index'; $('resultCount').textContent = 'Verify to browse the library';
+    $('counts').querySelectorAll('span').forEach(span => span.remove());
+    $('filterPanel').open = false; $('layoutPreview').hidden = true; $('previewDescription').textContent = '';
+  });
+  access.ready.then(() => { if (!libraryStarted) loadUnlockedLibrary(); });
 })();
