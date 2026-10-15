@@ -37,6 +37,7 @@ function db(): PDO {
     $pdo->exec('CREATE INDEX IF NOT EXISTS images_civitai_reaction_order ON images('.source_reaction_score_sql().' DESC,length(image_id) DESC,image_id DESC)');
     // Cover grouped counts and name/tag predicates without reading prompt/media columns.
     $pdo->exec('CREATE INDEX IF NOT EXISTS images_search_facets ON images(style_category,creator_name,loras_json,tags_json,image_id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS images_model_facets ON images(style_category,model_name,image_id)');
     return $pdo;
 }
 

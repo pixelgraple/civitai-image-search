@@ -112,7 +112,9 @@ The extension reads Civitai pages and the feed/detail requests used by those pag
 
 Open [the library](https://search-civitai.xyz/), search a word such as `selfie`, `landscape` or `portrait`, and refine by tag or style. Results include matching counts and pagination. Click a card for the full image, readable prompt, tags, generation resources and source link. Copy a prompt or move to the next image directly from the viewer.
 
-Click any tag in the full image viewer to find **all indexed images with that exact tag**, ignoring case. This opens page one of a fresh tag search, clears previous keyword/creator/LoRA/style filters, and keeps your chosen sort order. Tags containing commas or other punctuation are kept as one complete tag. You can then use Filters to narrow those results further.
+Click any tag in the full image viewer to find **all indexed images with that exact tag**, ignoring case. This opens page one of a fresh tag search, clears previous keyword/model/creator/LoRA/style filters, and keeps your chosen sort order. Tags containing commas or other punctuation are kept as one complete tag. You can then use Filters to narrow those results further.
+
+Click the **Model** name under Generation resources, such as **Krea2 - DarkRealism**, to start a fresh search for images with that captured model name. The **Model name** field in Filters also accepts full names or name fragments, ignoring case. Model search uses the saved generation model, with matching counts and pagination. It can be combined with tags, LoRAs, creators and style filters.
 
 The layout prioritizes desktop use, with a central image and a right-hand details panel. Mobile layouts are also supported.
 

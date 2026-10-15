@@ -4,6 +4,8 @@ Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
 ## Website update — 2026-10-15
 
+- Make generation model names clickable and add a dedicated Model name filter for captured model names, including case-insensitive name fragments.
+- Model clicks start a fresh search with matching counts and pagination, preserving the sort order.
 - Clicking a tag in the full image viewer starts a fresh search across the indexed library, clears unrelated filters, and keeps the current sort order.
 - Show the selected tag and matching count on page one, with pagination for all matching images.
 - Preserve complete clicked tags containing punctuation, including commas, while retaining manual AND/OR tag filters.

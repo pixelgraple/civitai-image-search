@@ -113,6 +113,7 @@ try {
     if ($action === 'search' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $q=search_parameter('q'); $tag=search_parameter('tag','',4000);
         $lora=search_parameter('lora','',200); $creator=ltrim(search_parameter('creator','',200),'@');
+        $model=search_parameter('model','',300);
         $category=search_parameter('category','',20); $sort=search_parameter('sort','newest',30);
         $qMode=search_parameter('qMode','all',3); $tagMode=search_parameter('tagMode','all',3);
         $tagMatch=search_parameter('tagMatch','list',5);
@@ -141,6 +142,7 @@ try {
         // instr treats %, _, quotes, and backslashes as literal name characters.
         if ($lora!=='') { $where[]='EXISTS (SELECT 1 FROM json_each(i.loras_json) jl WHERE instr(catalog_lower(CAST(jl.value AS TEXT)),?)>0)'; $args[]=lower_text($lora); }
         if ($creator!=='') { $where[]='instr(catalog_lower(i.creator_name),?)>0'; $args[]=lower_text($creator); }
+        if ($model!=='') { $where[]='instr(catalog_lower(i.model_name),?)>0'; $args[]=lower_text($model); }
         $baseWhere=$where; $baseArgs=$args;
         if ($category !== '') { $where[] = 'i.style_category=?'; $args[] = $category; }
         $clause = $where ? ' WHERE ' . implode(' AND ', $where) : '';

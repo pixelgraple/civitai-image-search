@@ -9,7 +9,7 @@ header('X-Frame-Options: DENY');
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Search the community Civitai image library by prompt, tags, LoRA, or creator, and sort by Civitai reactions.">
+  <meta name="description" content="Search the community Civitai image library by prompt, tags, model, LoRA, or creator, and sort by Civitai reactions.">
   <title>Search Civitai · Community image library</title>
   <link rel="stylesheet" href="style.css?v=filters-v1">
 </head>
@@ -45,9 +45,10 @@ header('X-Frame-Options: DENY');
             <div class="filter-field filter-field-wide"><label for="tag">Source tags</label><div class="tag-input"><input id="tag" type="text" maxlength="1000" placeholder="selfie, beach, sunglasses" aria-describedby="tagHelp"><label class="sr-only" for="tagMode">Combine source tags</label><select id="tagMode"><option value="all">All tags (AND)</option><option value="any">Any tag (OR)</option></select></div><p id="tagHelp">Separate up to 20 exact tags with commas. AND requires every tag; OR accepts any tag.</p></div>
             <div class="filter-field"><label for="lora">LoRA name</label><input id="lora" type="search" maxlength="200" autocomplete="off" placeholder="Full name or part of a name" aria-describedby="metadataHelp"></div>
             <div class="filter-field"><label for="creator">Creator username</label><input id="creator" type="search" maxlength="200" autocomplete="off" placeholder="Username or @username" aria-describedby="metadataHelp"></div>
+            <div class="filter-field filter-field-wide"><label for="model">Model name</label><input id="model" type="search" maxlength="300" autocomplete="off" placeholder="Full name or part of a name, e.g. Krea2 - DarkRealism" aria-describedby="metadataHelp"></div>
             <div class="filter-field filter-field-wide"><label for="category">Image style</label><select id="category"><option value="">All styles</option><option value="anime">Anime</option><option value="realistic">Realistic</option><option value="uncertain">Uncertain</option></select><p>Anime includes fantasy, illustration and animation cues. Other images are sorted as Realistic; Uncertain is retained for older records.</p></div>
           </div>
-          <p id="metadataHelp" class="filter-source-note">LoRA and creator searches match names captured from the source, ignoring case. Older images may be missing this metadata. Each filled filter must match.</p>
+          <p id="metadataHelp" class="filter-source-note">Model, LoRA and creator searches match names captured from the source, ignoring case. Older images may be missing this metadata. Each filled filter must match.</p>
           <div class="filter-actions"><button id="clearFilters" class="clear-filters" type="button">Clear all</button><button id="applyFilters" class="apply-filters" type="button">Apply filters</button></div>
         </div></details>
       </div>
@@ -66,6 +67,6 @@ header('X-Frame-Options: DENY');
     <div class="viewer-layout"><div class="viewer-stage"><button id="viewerPrev" class="viewer-arrow viewer-prev" type="button" aria-label="Previous image">‹</button><div id="viewerMedia" class="viewer-media"></div><button id="viewerNext" class="viewer-arrow viewer-next" type="button" aria-label="Next image">›</button><section id="viewerReactions" class="viewer-reactions" aria-label="Community reactions"></section></div><aside id="viewerDetails" class="viewer-details"></aside></div>
     <span id="viewerStatus" class="viewer-status" role="status" aria-live="polite"></span>
   </dialog>
-  <script src="app.js?v=tag-search-v2"></script>
+  <script src="app.js?v=model-search-v1"></script>
 </body>
 </html>
