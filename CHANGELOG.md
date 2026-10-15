@@ -2,6 +2,14 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## Classifier v7 — 2026-10-15
+
+- Require two distinct affirmative non-photographic style cues before assigning Anime; `source_anime` alone now defaults to Realistic.
+- Expand drawn, illustrated, animated and CG vocabulary while counting repeated, synonymous and overlapping cues only once.
+- Keep exclusions for negated styles, disabled resources, photographic props and generic quality tags.
+- Add bounded online catalog reclassification that preserves non-style fields and handles concurrent metadata updates.
+- Apply the same server classifier to future submissions and metadata repairs. No extension reload is required.
+
 ## Website access gate — 2026-10-15
 
 - Show a short preloader followed by an SVG CAPTCHA before loading the library.

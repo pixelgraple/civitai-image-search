@@ -36,6 +36,12 @@ Verified access lasts one fixed hour in a Secure, HttpOnly session cookie, share
 
 The guide and extension installation/download pages stay public. Do not add CAPTCHA enforcement to contributor endpoints or embed a bypass credential in the extension.
 
+## Updating style classification
+
+The server's `style-classifier.php` is shared by new submissions and metadata repair. Classifier v7 requires at least two distinct affirmative non-photographic style cues for Anime; a lone `source_anime` cue defaults to Realistic.
+
+Back up the catalog and classifier before deployment. Preview existing records with `php reclassify.php --online`, then use `--online --apply` to update them while collection remains active. The online mode classifies bounded batches outside write transactions and checks that classifier inputs and previous style fields still match before updating. Read its final conflict count; concurrent changes are retried with fresh metadata, and unresolved rows are reported rather than overwritten. Only category, confidence and style evidence are updated. No image downloads or FTS rebuild are needed. Legacy offline mode retains its full transactional preservation checks.
+
 ## PHP and worker
 
 Run the dedicated PHP 8.4 pool and image worker as the non-login civitai-library account, using CIVITAI_LIBRARY_CONFIG=/data/civitai/config/config.php. Use a dedicated local PHP-FPM socket, for example `/run/php/civitai-library.sock`, and configure Nginx to use it. Restrict the pool to the application plus private configuration and runtime directories, ignore inherited `.user.ini` files, and write errors beneath the data root. Disable shell/process functions, FFI, raw file uploads and URL fopen in the web pool; the CLI worker needs separate settings for its bounded thumbnail subprocess. Keep code and configuration unwritable to the service. Forward the Authorization header explicitly for optional protected mode. For a systemd worker, use `ProtectSystem=strict` and grant write access only to required runtime directories under `/data/civitai/`.

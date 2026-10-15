@@ -141,7 +141,7 @@ This repair runs on the server without requiring contributors to keep browser ta
 
 ### Anime and Realistic are metadata groups
 
-Classifier v6 puts affirmative fantasy, anime, illustration, animation or digital-art cues in **Anime**. Otherwise it defaults to **Realistic**. Anime cues take precedence when photographic wording also appears. The rule reads positive prompts, tags, model names and LoRA names.
+Classifier v7 requires **at least two distinct affirmative non-photographic style cues** for **Anime**. It reads positive prompts, tags, model names and LoRA names; otherwise it defaults to **Realistic**. For example, `source_anime` alone stays Realistic, while anime plus cel shading can qualify as Anime. Repeated words, spelling variants and the same cue repeated across metadata fields count only once. Overlapping words in one style phrase do not manufacture extra evidence.
 
 Separate negative prompts and disabled or zero-weight prompt resources do not provide positive cues. Ordinary references to a digital camera, artwork on a prop or phrases such as “drawing attention” are excluded from art-style detection.
 
@@ -190,7 +190,7 @@ Use isolated test data. Preserve the catalog and media when deploying code, and 
 
 The optional reaction backfill worker snapshots known IDs with missing or incomplete source reactions and stores resumable progress. A new upload does not extend an existing job. It updates only source reactions, leaving prompts, image downloads, classification and community votes intact. Source pacing and cooldowns still apply. See the worker's CLI help and deployment guide before starting a job.
 
-`server/reclassify.php --uncertain-only` previews corrections to legacy Uncertain records. `--apply` saves them. Back up the catalog first.
+`server/reclassify.php --online` previews corrections to the existing catalog in bounded batches; add `--apply` to save them. This mode classifies outside write transactions and checks for concurrent metadata changes before updating only the style fields. It reports category transitions and any unresolved conflicts. `--uncertain-only` limits either mode to legacy Uncertain records. Back up the catalog first.
 
 ## Reporting a problem
 

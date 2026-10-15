@@ -1,26 +1,52 @@
 <?php
 declare(strict_types=1);
-const CIVITAI_STYLE_CLASSIFIER_VERSION = 6;
+const CIVITAI_STYLE_CLASSIFIER_VERSION = 7;
+const CIVITAI_STYLE_ANIME_MINIMUM_CUES = 2;
 
-/** Library sorting policy, not a visual inspection or a statistical probability. */
+/** Library sorting policy, not visual inspection or a statistical probability. */
 function classify_prompt_style(string $prompt, string $model, array $loras, array $tags): array {
-    // Related spellings share one rule so repeated/overlapping words cannot
-    // inflate a score. Content words such as hair, clothes and gender are absent.
-    $anthroPattern = 'anthro|anthropomorphic|anthromorphic|furry character';
     $lightingPattern = '(?:controlled|studio|directional) lighting|lighting is directional|(?:professional[ -]grade|studio) (?:lighting )?setup';
+    // Each rule represents one distinct descriptor. Spelling variants and
+    // source_anime/ai-anime share Anime; anime, manga and hentai are distinct.
+    // The longest overlapping phrase wins: digital illustration is one cue,
+    // never both "digital" and "illustration". Quality scores and AI alone
+    // describe neither an illustrated medium nor a photographic one.
+    $artRules = [
+        ['anime', 'anime medium', '(?:(?:source|ai)[ -]+)?anime(?:sque)?|japanimation|japanese[ -]animation', 6],
+        ['manga', 'manga medium', '(?:source[ -]+)?manga', 6],
+        ['manhwa', 'manhwa medium', 'manhwa|webtoon', 6],
+        ['manhua', 'manhua medium', 'manhua', 6],
+        ['hentai', 'hentai medium', '(?:source[ -]+)?hentai', 6],
+        ['cartoon', 'cartoon medium', '(?:source[ -]+)?cartoons?|cartoonish|cartoony|toon(?:[ -](?:art|style))?', 6],
+        ['animation', 'animation medium', '(?:2[ -]?d[ -]+)?animat(?:ion|ed)(?:[ -]+(?:film|movie|style))?|(?:pixar|dream[ -]?works|disney|ghibli|illumination)(?:[ -](?:inspired|like))?(?:[ -](?:3[ -]?d|animated|animation|cartoon))?[ -](?:style|animation|animated(?: film)?|look|aesthetic)', 6],
+        ['illustration', 'illustrated medium', '(?:(?:digital|editorial|book|fashion|children[’\x27]s)[ -]+)?illustrat(?:ion|ions|ed)(?:[ -]style)?|concept[ -]art|key[ -]visual', 6],
+        ['drawing', 'drawn medium', '(?:(?:digital|pencil|charcoal|graphite|ink|hand)[ -]+)?draw(?:ing|ings|n)|hand[ -]drawn', 6],
+        ['sketch', 'sketched medium', '(?:(?:pencil|charcoal|graphite|ink|digital)[ -]+)?sketch(?:es|ed|ing)?|sketchbook[ -]art', 6],
+        ['painting', 'painted medium', '(?:(?:digital|oil|acrylic|gouache|tempera|pastel|watercolou?r|matte|ink|hand)[ -]+)?paint(?:ing|ings|ed)|watercolou?rs?|gouache|impasto|fresco|sumi[ -]e|en[ -]plein[ -]air', 6],
+        ['digital-art', 'digital art style', 'digital(?:[ -]+(?:art(?:work)?|style)|(?=\s*(?:[,;|):\]]|\.(?:\s|$)|$)))', 6],
+        ['comic', 'comic medium', '(?:source[ -]+)?comics?(?:[ -]book)?(?:[ -](?:art|illustration|style))?(?:[ -]style)?|graphic[ -]novel|bande[ -]dessin[eé]e', 6],
+        ['cel-shading', 'cel shading', 'cel[ -]shad(?:ed|ing)|cell[ -]shad(?:ed|ing)|toon[ -]shad(?:ed|ing)', 5],
+        ['line-art', 'line art', 'line[ -]?art|line[ -]drawing|contour[ -]drawing', 5],
+        ['ink-outline', 'inked outlines', '(?:thick|bold|heavy|clean|inked)[ -]+(?:black[ -]+)?outlines?|inked[ -]lines|inking', 3],
+        ['flat-color', 'flat colors', 'flat[ -]colou?rs?|flat[ -]shad(?:ed|ing)|solid[ -]colou?r[ -]fills?', 3],
+        ['pixel-art', 'pixel art', 'pixel[ -]art|pixelated[ -]art|pixel[ -]sprites?|sprite[ -]art|(?:8|16|32)[ -]bit[ -](?:art|style|graphics)', 6],
+        ['vector-art', 'vector art', 'vector(?:[ -](?:art|illustration|drawing|graphics))?|(?:svg|eps)[ -](?:art|illustration)', 6],
+        ['cgi', 'CG rendering', '(?:3[ -]?d|computer)[ -]animat(?:ed|ion)(?:[ -]film)?|(?:3[ -]?d|cg|cgi|computer[ -]generated)(?:[ -](?:art(?:work)?|imagery|graphics|render(?:ing)?|illustration|model(?:ing)?))?|(?:ray|path)[ -]traced[ -]render(?:ing)?|(?:octane|redshift|blender|cinema[ -]4d|unreal[ -]engine|daz[ -](?:studio|3d)|poser)[ -](?:render(?:ing)?|art)|zbrush[ -]sculpt', 6],
+        ['stylization', 'stylized rendering', 'styliz(?:ed|ation)|stylis(?:ed|ation)|non[ -]photo[ -]?realis(?:tic|m)|non[ -]realistic|non[ -]photographic|npr[ -]render(?:ing)?', 3],
+        ['low-poly', 'low polygon art', 'low[ -]poly(?:gon)?|polygonal[ -]art|faceted[ -]render(?:ing)?', 5],
+        ['voxel', 'voxel art', 'voxel(?:[ -](?:art|render(?:ing)?|style))?', 5],
+        ['clay-art', 'clay animation', 'claymation|clay[ -](?:animation|render(?:ing)?|art[ -]style)|plasticine[ -]style|stop[ -]motion', 5],
+        ['paper-art', 'paper art', 'paper[ -]cut(?:out)?[ -](?:art|style)|papercut[ -](?:art|style)|cut[ -]paper[ -]art|origami[ -](?:art|style)', 5],
+        ['printmaking', 'printmaking medium', 'woodcut|linocut|lithograph(?:y|ic)?|engraving|etching|screen[ -]print[ -]art|risograph(?:y)?|ukiyo[ -]e', 5],
+        ['halftone', 'halftone shading', 'halftone(?:[ -](?:dots|shading|style))?|ben[ -]day[ -]dots|screentone', 3],
+        ['hatching', 'hatched shading', 'cross[ -]?hatch(?:ed|ing)|hatched[ -]shading|stippl(?:ed|ing)', 3],
+        ['game-art', 'video game art', '(?:video[ -]game|game)[ -](?:art|render(?:ing)?|graphics|screenshot)|visual[ -]novel(?:[ -](?:art|style))?|jrpg[ -](?:art|style)', 5],
+        ['chibi', 'chibi proportions', 'chibi|super[ -]deformed', 3],
+        ['fantasy', 'fantasy style', 'fantasy|fantastical', 2],
+        ['anthro', 'anthro character', '(?:source[ -]+)?anthro|anthropomorphic|anthromorphic|(?:source[ -]+)?furry(?:[ -]character)?', 2],
+        ['anime-character', 'anime character vocabulary', 'waifu|vtuber|virtual[ -]youtuber|kemonomimi|nekomimi', 2],
+    ];
     $rules = [
-        ['anime', 'anime medium', 'anime|manga|hentai|manhwa|manhua|japanese animation', 6, true],
-        ['anime', 'fantasy style', 'fantasy', 6, true],
-        // A bare digital tag or digital-art phrase describes a style. A digital
-        // camera, watch or screen describes an object, not the image medium.
-        ['anime', 'digital art style', 'digital(?:[ -]+(?:art(?:work)?|painting|drawing|illustration|render(?:ing)?|animation|style)|(?=\s*(?:[,;|):\]]|\.(?:\s|$)|$)))', 6, true],
-        ['anime', 'digital illustration', 'digital illustration', 6, true],
-        ['anime', 'comic illustration', 'comics?(?: book)? art(?: style)?|comics?(?: book)? illustration|comics?(?: book)? style', 6, true],
-        ['anime', 'animated film style', '(?:pixar|dream[ -]?works)(?:[ -](?:inspired|like))?(?:[ -](?:3d|3 d|animated|animation|cartoon))?[ -](?:style|animation|animated(?: film)?|look|aesthetic)|(?:3[ -]?d|computer)[ -]animat(?:ed|ion)(?: film)?(?:[ -]style)?', 6, true],
-        ['anime', 'cel shading', 'cel[ -]shad(?:ed|ing)|cell[ -]shad(?:ed|ing)', 5, true],
-        ['anime', 'anthro character', $anthroPattern, 2, false],
-        ['anime', 'anime vocabulary', 'waifu|vtuber|danbooru|safebooru', 2, false],
-        ['anime', 'line art', 'lineart|line art', 2, false],
         ['realistic', 'photography', 'photo(?:s|graph(?:s|ed|ic|y|ing)?)?', 6, true],
         ['realistic', 'photorealism', 'photo[ -]?realis(?:tic|m)|photo[ -]?real', 6, true],
         ['realistic', 'camera capture', 'dslr|slr camera|camcorder|(?:shot|captured|taken) (?:on|with|using) (?:(?:an?|old|modern|rear|front|triple[ -]lens) ){0,3}(?:iphone|smartphone|phone|camera|canon|nikon|sony|leica)|(?:smartphone|iphone|phone) (?:camera|flash)', 5, true],
@@ -38,8 +64,7 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
     ];
     $prompt = style_without_disabled_groups($prompt);
     $inlineLoras = [];
-    // Resource names are metadata, not prose. A disabled resource cannot supply
-    // style evidence; a positive resource uses the same rules as named LoRAs.
+    // Disabled resources cannot supply positive style evidence.
     $prompt = preg_replace_callback('~<(?:lora|lyco):([^<>]+):\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*>~iu', static function(array $match) use (&$inlineLoras): string {
         if ((float)$match[2] > 0) $inlineLoras[] = $match[1];
         return ' ';
@@ -51,59 +76,30 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
     $scores = ['anime'=>0, 'realistic'=>0];
     $strong = ['anime'=>false, 'realistic'=>false];
     $families = ['anime'=>[], 'realistic'=>[]];
-    $signals = []; $seen = [];
+    $signals = []; $seen = []; $artCues = [];
     foreach ($sources as [$source, $raw, $weight]) {
         if (in_array($source, ['model','lora'], true)) {
             $raw = preg_replace('~(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])~', ' ', $raw) ?? $raw;
         }
         $text = lower_text(str_replace(['_', '–', '—', '‑'], [' ', '-', '-', '-'], $raw));
-        // Negative/zero weighted prompt groups express exclusions. Never treat
-        // their words as positive style evidence, including comma-separated groups.
         $text = style_without_disabled_groups($text);
         if ($source === 'tag' && preg_match('~^(?:photo(?:graph)? \(object\)|photo background)$~u', trim($text))) continue;
-        $medium = style_positive_match($text, 'oil painting|painting|watercolor|watercolour|drawing|illustration|cartoon|animation|animated|3[ -]?d render(?:ing)?|cgi|digital painting|comic book art|pixel art', $source === 'prompt');
-        if ($medium !== null) {
-            if (!isset($seen[$source.'|other medium'])) {
-                $seen[$source.'|other medium'] = true;
-                $scores['anime'] += 6 * $weight;
-                $strong['anime'] = true; $families['anime']['illustrated medium'] = true;
-                $signals[] = ['category'=>'anime','source'=>$source,'term'=>$medium,'rule'=>'illustrated medium'];
-            }
-        }
-        // The library's Anime bucket includes illustrated and animated media.
-        if ($source === 'prompt' && style_positive_match($text, 'illustration', true) !== null &&
-            style_positive_match($text, '(?:thick|bold) (?:black )?outlines?', true) !== null &&
-            style_positive_match($text, 'flat colou?rs?', true) !== null) {
-            $scores['anime'] += 6; $strong['anime'] = true; $families['anime']['comic rendering'] = true;
-            $signals[] = ['category'=>'anime','source'=>$source,'term'=>'illustration, outlines and flat colors','rule'=>'comic rendering'];
-        }
-        if ($source === 'prompt') {
-            // Quality adjectives alone are not a medium. A cluster containing
-            // a distinctive booru-style token supports an affirmative anthro
-            // character. Quality tags alone must not oppose photographic cues.
-            $quality = []; $distinctive = false;
-            foreach (['masterpiece'=>'masterpiece', 'quality'=>'(?:best|highest|perfect) quality',
-                'resolution'=>'absurdres', 'aesthetic'=>'very aesthetic', 'awa'=>'very awa',
-                'score'=>'score[ _](?:9|8[ _]up|7[ _]up)'] as $family=>$pattern) {
-                $term = style_positive_match($text, $pattern);
-                if ($term === null) continue;
-                $quality[] = $term;
-                $distinctive = $distinctive || !in_array($family, ['masterpiece','quality'], true);
-            }
-            if (count($quality) >= 2 && $distinctive && style_positive_match($text, $anthroPattern, true) !== null) {
-                $scores['anime'] += 3; $families['anime']['booru art tags'] = true;
-                $signals[] = ['category'=>'anime','source'=>$source,'term'=>implode(', ', $quality),'rule'=>'booru art tags'];
-            }
+        foreach (style_distinct_art_matches($text, $artRules, $source === 'prompt') as $match) {
+            [$cue, $label, $term, $strength] = $match;
+            // One canonical cue across the entire record. A copied tag, model
+            // suffix, LoRA name or repeated prompt word never adds another vote.
+            if (isset($artCues[$cue])) continue;
+            $artCues[$cue] = true;
+            $scores['anime'] += $strength * $weight;
+            $strong['anime'] = $strong['anime'] || $strength >= 5;
+            $families['anime'][$cue] = true;
+            $signals[] = ['category'=>'anime','source'=>$source,'term'=>$term,'rule'=>$label,'cue'=>$cue];
         }
         foreach ($rules as [$category, $label, $pattern, $strength, $explicit]) {
-            // Viewpoint and depth-of-field tags occur in illustrated prompts.
-            // A viewpoint adds photographic evidence only with a lighting setup.
             if ($label === 'camera viewpoint' && ($source !== 'prompt' || style_positive_match($text, $lightingPattern) === null)) continue;
-            $term = style_positive_match($text, $pattern, $source === 'prompt' && ($category === 'anime' || $label === 'photography'));
+            $term = style_positive_match($text, $pattern, $source === 'prompt' && $label === 'photography');
             if ($term === null || isset($seen[$source.'|'.$label])) continue;
             $seen[$source.'|'.$label] = true;
-            // Keep photographic evidence for explanations, even when an Anime
-            // cue takes precedence under the library's binary sorting policy.
             if ($source === 'tag' && $label === 'realism' && preg_match('~^(?:realistic|realism|photorealistic|photorealism)$~u', trim($text))) {
                 $explicit = true; $strength = 4;
             }
@@ -113,22 +109,48 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
             $scores[$category] += $strength * $weight;
             $families[$category][$label] = true;
             $strong[$category] = $strong[$category] || $explicit;
-            $signals[] = ['category'=>$category, 'source'=>$source, 'term'=>$term, 'rule'=>$label];
+            $signals[] = ['category'=>$category,'source'=>$source,'term'=>$term,'rule'=>$label];
         }
     }
-    // User-selected binary policy: any affirmative art/fantasy/Anime cue wins;
-    // everything else goes into Realistic, including sparse metadata. This is
-    // a sorting default, not evidence that the image is an actual photograph.
-    $category = $scores['anime'] > 0 ? 'anime' : 'realistic';
+    $cueCount = count($artCues);
+    $category = $cueCount >= CIVITAI_STYLE_ANIME_MINIMUM_CUES ? 'anime' : 'realistic';
+    if ($category === 'realistic') {
+        $signals[] = ['category'=>'realistic','source'=>'policy',
+            'term'=>$cueCount.' distinct illustrated/Anime cue'.($cueCount === 1 ? '' : 's').'; at least '.CIVITAI_STYLE_ANIME_MINIMUM_CUES.' required for Anime',
+            'rule'=>'two-cue realistic default'];
+    }
     if ($category === 'realistic' && !$strong['realistic']) {
         $confidence = 0.50;
-        $signals[] = ['category'=>'realistic','source'=>'policy','term'=>'No affirmative Anime, fantasy or illustrated-style cue','rule'=>'realistic default'];
     } else {
         $other = $category === 'anime' ? 'realistic' : 'anime';
         $margin = max(0, $scores[$category] - $scores[$other]);
-        $confidence = round(min(0.95, ($strong[$category] ? 0.78 : 0.60) + min(0.12, $margin / 100) + min(0.05, (count($families[$category])-1) * 0.02)), 2);
+        $confidence = round(min(0.95, ($strong[$category] ? 0.78 : 0.60) + min(0.12, $margin / 100) + min(0.05, max(0, count($families[$category])-1) * 0.02)), 2);
     }
-    return ['category'=>$category, 'confidence'=>$confidence, 'signals'=>$signals, 'scores'=>$scores, 'version'=>CIVITAI_STYLE_CLASSIFIER_VERSION];
+    return ['category'=>$category,'confidence'=>$confidence,'signals'=>$signals,'scores'=>$scores,
+        'evidence'=>['animeCueCount'=>$cueCount,'animeCueMinimum'=>CIVITAI_STYLE_ANIME_MINIMUM_CUES,'animeCues'=>array_keys($artCues)],
+        'version'=>CIVITAI_STYLE_CLASSIFIER_VERSION];
+}
+
+/** Prefer complete compound descriptors over nested words at the same location. */
+function style_distinct_art_matches(string $text, array $rules, bool $ignoreProps): array {
+    $candidates = [];
+    foreach ($rules as $order=>[$cue, $label, $pattern, $strength]) {
+        foreach (style_positive_matches($text, $pattern, $ignoreProps) as [$term, $offset]) {
+            $candidates[] = [$cue,$label,$term,$strength,$offset,strlen($term),$order];
+        }
+    }
+    usort($candidates, static fn(array $a, array $b): int => ($b[5] <=> $a[5]) ?: ($a[4] <=> $b[4]) ?: ($a[6] <=> $b[6]));
+    $accepted = []; $ranges = [];
+    foreach ($candidates as $candidate) {
+        $start = $candidate[4]; $end = $start+$candidate[5];
+        foreach ($ranges as [$rangeStart,$rangeEnd]) {
+            if ($start < $rangeEnd && $end > $rangeStart) continue 2;
+        }
+        $ranges[] = [$start,$end];
+        $accepted[] = $candidate;
+    }
+    usort($accepted, static fn(array $a, array $b): int => $a[4] <=> $b[4]);
+    return $accepted;
 }
 
 /** Remove whole disabled groups, including nested positive groups inside them. */
@@ -150,12 +172,20 @@ function style_without_disabled_groups(string $text): string {
 
 /** Return the first affirmative occurrence; local negation is not style evidence. */
 function style_positive_match(string $text, string $pattern, bool $ignoreProps = false): ?string {
+    $matches = style_positive_matches($text, $pattern, $ignoreProps);
+    return $matches[0][0] ?? null;
+}
+
+/** Retain offsets so overlapping medium phrases cannot become multiple cues. */
+function style_positive_matches(string $text, string $pattern, bool $ignoreProps = false): array {
+    $positive = [];
     preg_match_all('~(?<![\p{L}\p{N}])(?:'.$pattern.')(?![\p{L}\p{N}])~u', $text, $matches, PREG_OFFSET_CAPTURE);
     foreach ($matches[0] ?? [] as [$term, $offset]) {
         $prefix = substr($text, max(0, $offset-160), min(160, $offset));
         // Deliberately bounded vocabulary: "not anime but a photo" keeps photo,
         // while "no anime or cartoon" and "not a photo" suppress the negated cues.
-        if (preg_match('~(?:\b(?:no|not|without|avoid|avoiding|exclude|excluding|remove|removing|omit|omitting)\b(?:\s+(?:a|an|any|the|style|styles|tags|containing|references|to|of|look|like|rendered|as|and|or|anime|manga|hentai|fantasy|cartoon|photo|photographic|photorealistic|digital|comic|book|art|illustration|drawing|painting|cgi|rendering)){0,8}\s+|\bnon[ -]*)$~u', $prefix)) continue;
+        $negatedStyleWord = 'a|an|any|the|explicit|style|styles|tags|containing|references|to|of|look|like|rendered|as|and|or|source|ai|anime|animesque|japanimation|japanese|manga|manhwa|manhua|webtoon|hentai|fantasy|fantastical|cartoon|cartoons|cartoonish|cartoony|toon|photo|photographic|photorealistic|realistic|digital|comic|comics|book|art|artwork|illustration|illustrations|illustrated|drawing|drawings|drawn|hand|sketch|sketches|sketched|sketching|painting|paintings|painted|oil|acrylic|gouache|watercolor|watercolour|charcoal|graphite|ink|pencil|cgi|cg|3d|2d|3|2|d|computer|generated|animation|animated|film|movie|render|rendering|pixar|dreamworks|disney|ghibli|cel|cell|shaded|shading|line|lineart|outlines|flat|colors|colours|pixel|pixelated|sprites|vector|graphics|stylized|stylised|low|poly|polygon|voxel|claymation|clay|stop|motion|paper|papercut|origami|woodcut|linocut|lithograph|engraving|etching|halftone|screentone|cross|hatching|crosshatching|stippled|stippling|game|video|visual|novel|jrpg|chibi|super|deformed|anthro|anthropomorphic|anthromorphic|furry|character|waifu|vtuber|kemonomimi|nekomimi';
+        if (preg_match('~(?:\b(?:no|not|without|avoid|avoiding|exclude|excluding|remove|removing|omit|omitting)\b(?:[\s-]+(?:'.$negatedStyleWord.')){0,12}[\s-]+|\bnon[ -]*)$~u', $prefix)) continue;
         if (preg_match('~\b(?:non|no|not)[ -]+photo[ -]*$~u', $prefix)) continue;
         // Descriptions of an absent optical effect do not supply a positive
         // lens cue, including coordinated "no lens distortion or shallow ...".
@@ -164,11 +194,21 @@ function style_positive_match(string $text, string $pattern, bool $ignoreProps =
         // Semi-realistic describes a blend, not an affirmative photographic
         // medium or the existing explicit "realistic portrait" declaration.
         if (preg_match('~^realis(?:tic|m)\b~u', $term) && preg_match('~\bsemi[ -]*$~u', $prefix)) continue;
+        $suffix = substr($text, $offset+strlen($term), 70);
+        // A bare word can be a style tag, but natural-language actions and
+        // objects (painted lips, drawn curtains, furry rugs) are not media.
+        if (in_array($term, ['drawn','painted','furry'], true)) {
+            $standaloneTag = preg_match('~(?:^|[,;|\n])\s*[\[(]?\s*$~u', $prefix) &&
+                preg_match('~^\s*(?::\s*[0-9.]+)?\s*[\])]?\s*(?:[,;|\n]|$)~u', $suffix);
+            $explicitMedium = $term !== 'furry' && preg_match('~^[ -]+(?:art|artwork|image|portrait|scene|landscape|illustration|style)\b~u', $suffix);
+            if (!$standaloneTag && !$explicitMedium) continue;
+        }
+        if ($term === 'animated' && preg_match('~^\s+(?:expressions?|conversations?|gestures?|personality|movements?|poses?|faces?|eyes|discussions?|smiles?)\b~u', $suffix)) continue;
+        if (preg_match('~^3[ -]?d$~u', $term) && preg_match('~^\s+(?:print(?:ed|ing|ers?)?|glasses|camera)\b~u', $suffix)) continue;
         if ($ignoreProps) {
-            $suffix = substr($text, $offset+strlen($term), 70);
-            if (preg_match('~(?:illustration|drawing|painting|comic(?: book)? art)~u', $term) &&
+            if (preg_match('~(?:illustration|drawing|painting|sketch|comic|manga|art|woodcut|linocut|lithograph|engraving|etching)~u', $term) &&
                 preg_match('~\bphoto(?:graph)?\s+(?:of|showing|depicting)\s+(?:a|an|the)\s+(?:(?:framed|printed|digital|pencil|comic|book|art|small|large|colorful)\s+){0,5}$~u', $prefix)) continue;
-            if ($term==='drawing' && preg_match('~^\s+(?:(?:all|the|her|his|your|our)\s+)?(?:(?:immediate|direct|particular|special)\s+)?(?:(?:viewer[’\x27]s\s+)?(?:attention|focus|eye|gaze)|a breath|closer|taut|tight|together|back|near|(?:the\s+)?fabric\s+(?:taut|tight))\b~u',$suffix)) continue;
+            if (in_array($term, ['drawing','drawn'], true) && preg_match('~^\s+(?:(?:all|the|her|his|your|our)\s+)?(?:(?:immediate|direct|particular|special)\s+)?(?:(?:viewer[’\x27]s\s+)?(?:attention|focus|eye|gaze)|a breath|closer|taut|tight|together|back|near|up|aside|away|to|into|toward|towards|(?:the\s+)?fabric\s+(?:taut|tight))\b~u',$suffix)) continue;
             if (!str_starts_with($term,'photo') && preg_match('~^[ -]+(?:[a-z]+[ -]+){0,6}(?:posters?|shirts?|t[ -]?shirts?|tattoos?|prints?|logos?|stickers?|graphics?|cases?|eyeliner|makeup|costumes?|cosplay|merchandise)\b~u', $suffix, $prop) &&
                 !preg_match('~\b(?:wearing|holding|person|woman|man|portrait|scene|of|in|against|with)\b~u', $prop[0])) continue;
             if (preg_match('~^\s+(?:hanging|mounted|displayed|printed)\s+(?:on|above|inside|across)\b~u',$suffix)) continue;
@@ -180,7 +220,7 @@ function style_positive_match(string $text, string $pattern, bool $ignoreProps =
             if (!str_starts_with($term,'photo') && preg_match('~\b(?:tattoos?|tattooed\s+(?:arms?|legs?|thighs?))(?:\s+(?:on|her|his|their|arms?|legs?|thighs?)){0,4},?\s+(?:of|in|with|featuring|depicting|showing|including)(?:[ -]+[a-z]+){0,6}\s+$~u',$prefix)) continue;
             if (!str_starts_with($term,'photo') && preg_match('~\b(?:screen|tv|monitor|television)\b[^.!?;\n]{0,75}\b(?:shows?|showing|displays?|displaying|playing)\b(?:[ -]+[a-z]+){0,5}\s+$~u',$prefix)) continue;
         }
-        return $term;
+        $positive[] = [$term,$offset];
     }
-    return null;
+    return $positive;
 }
