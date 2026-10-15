@@ -2,6 +2,19 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.19 — Panel opening recovery
+
+- Rebuild panels removed during Civitai navigation instead of toggling a detached element.
+- Mark the panel ready only after initialization succeeds; clean up failed mounts so a later toolbar click can retry.
+- Check the injected panel result. Show a toolbar warning and open Browsing & activity with recovery instructions if opening fails.
+- Preserve existing queue ownership, scan state, source request limits, and manual scrolling in other tabs.
+- Add panel lifecycle and toolbar failure regressions. Update status-test fixtures to acknowledge per-tab server transfer settings.
+
+### Hosted gallery rate limit
+
+- Diagnose gallery-triggered Cloudflare 520 errors as the hosting WAF's 120-request/minute limit on the shared media endpoint.
+- Raise only this site's WAF threshold to 1,200 requests/minute with operator approval. CAPTCHA, ingestion quotas, and other WAF rules remain enabled.
+
 ## Classifier v7 — 2026-10-15
 
 - Require two distinct affirmative non-photographic style cues before assigning Anime; `source_anime` alone now defaults to Realistic.

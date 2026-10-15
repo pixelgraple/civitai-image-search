@@ -11,12 +11,12 @@ header('X-Frame-Options: DENY');
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Help index Civitai with the Index Civitai extension. Choose a gallery, start a scan, and keep working while images and prompts join the shared searchable library.">
   <title>GUIDE · Help index Civitai</title>
-  <link rel="stylesheet" href="extension.css?v=2.8.18">
+  <link rel="stylesheet" href="extension.css?v=2.8.19">
   <link rel="stylesheet" href="guide.css?v=contributor-guide-v1">
 </head>
 <body class="guide-page">
   <a class="guide-skip" href="#guide-content">Skip to the guide</a>
-  <header class="site-header"><a class="brand" href="/" aria-label="Search Civitai home">SEARCH<span>CIVITAI</span><small>XYZ</small></a><nav class="contributor-nav" aria-label="Site navigation"><a class="library-nav" href="/">Image library</a><a class="nav-download" href="/downloads/index-civitai-2.8.18.zip" download>Index Civitai ↓</a><a class="nav-guide" href="/guide.php" aria-current="page">GUIDE</a></nav></header>
+  <header class="site-header"><a class="brand" href="/" aria-label="Search Civitai home">SEARCH<span>CIVITAI</span><small>XYZ</small></a><nav class="contributor-nav" aria-label="Site navigation"><a class="library-nav" href="/">Image library</a><a class="nav-download" href="/downloads/index-civitai-2.8.19.zip" download>Index Civitai ↓</a><a class="nav-guide" href="/guide.php" aria-current="page">GUIDE</a></nav></header>
   <main id="guide-content" class="guide-main">
     <section class="guide-hero" aria-labelledby="guide-title">
       <div><p class="eyebrow">THE COMMUNITY CONTRIBUTOR GUIDE</p><h1 id="guide-title">Help everyone find<br>the images you love.</h1><p class="lead">Choose a Civitai gallery you like, start a scan, and let Index Civitai collect its prompts and images for our shared search library. You can keep using other tabs while it works.</p><div class="actions"><a class="button primary" href="#start-collecting">Start collecting ↓</a><a class="button" href="/extension.php#install">Install the extension</a></div><p class="caption">Works on civitai.com and civitai.red · No account or contributor key needed</p></div>

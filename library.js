@@ -1,7 +1,8 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.18', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.19', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
+  $('panelOpenError').hidden = typeof location === 'undefined' || new URL(location.href).searchParams.get('panelError') !== '1';
   let settingsOpen = false, saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
   let latest = null, revision = 0, statusPort = null, portReady = false, reconnectTimer = null, handshakeTimer = null, reconnectAttempts = 0, disposed = false;
   const count = value => Math.max(0, Number(value) || 0).toLocaleString();

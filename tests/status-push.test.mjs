@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 import { harness } from './background-harness.mjs';
 
 const extensionSender = { id: 'test-extension', url: 'chrome-extension://test-extension/library.html' };
@@ -23,10 +24,13 @@ function port(h, t, source = extensionSender, name = 'index-civitai-status-v1') 
   return { value, messages, disconnectListeners, get disconnected() { return disconnected; } };
 }
 function install(h) {
+  h.context.crypto = webcrypto;
   h.context.nextFeed = async () => ({ items: [], catalogItems: [], cursor: 'private-cursor', done: false });
   h.run('ISSFeed.next = (...args) => nextFeed(...args); PromptCatalogDB.forPromptCollection = async items => ({items,skippedIds:[]}); PromptCatalogDB.upsert = async items => items;');
   h.context.fetch = async (url, options) => {
     const body = JSON.parse(options.body);
+    if (url.endsWith('action=download-settings')) return new Response(JSON.stringify({ ok: true, concurrency: body.concurrency ?? 32, serverMax: 32 }));
+    if (url.endsWith('action=download-status')) return new Response(JSON.stringify({ ok: true, items: [], server: { limit: 32, active: 0 } }));
     return new Response(JSON.stringify(url.endsWith('action=check')
       ? { ok: true, items: body.imageIds.map(imageId => ({ imageId, exists: false, needsDownload: true, downloadStatus: 'unknown', sha256: '' })) }
       : { ok: true, accepted: body.items.length, skipped: 0 }));
@@ -70,7 +74,7 @@ test('background handshake is hardcoded in every status response and Start trigg
   h.context.nextFeed = async () => { reads++; return { items: [], catalogItems: [], cursor: null, done: false }; };
   for (const type of ['getState', 'getConfig', 'getSourceStatus', 'civitai-auto-status']) {
     const response = await h.message({ type });
-    assert.equal(response.backgroundVersion, '2.8.18'); assert.equal(response.statusProtocol, 1);
+    assert.equal(response.backgroundVersion, '2.8.19'); assert.equal(response.statusProtocol, 1);
   }
   assert.equal((await start(h)).ok, true);
   await until(() => reads === 1, 'Start should not wait for an alarm or offscreen heartbeat');
@@ -84,7 +88,7 @@ test('live initial snapshots are complete, bounded, private, and scoped to the s
   const own = port(h, t, sender(h)), global = port(h, t);
   await until(() => own.messages.length && global.messages.length);
   const message = own.messages.at(-1), aggregate = global.messages.at(-1);
-  assert.equal(message.type, 'index-civitai-status'); assert.equal(message.backgroundVersion, '2.8.18'); assert.equal(message.statusProtocol, 1);
+  assert.equal(message.type, 'index-civitai-status'); assert.equal(message.backgroundVersion, '2.8.19'); assert.equal(message.statusProtocol, 1);
   for (const field of ['state', 'browse', 'source', 'config']) assert.equal(typeof message[field], 'object');
   assert.equal(message.state.sessionTabId, 7); assert.equal(message.state.status.catalogSynced, 1); assert.equal(message.state.runs, undefined);
   assert.equal(aggregate.state.activeTabs, 2); assert.equal(aggregate.state.status.catalogSynced, 3);

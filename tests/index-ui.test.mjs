@@ -32,8 +32,8 @@ function transportHarness({ connectFails = false } = {}) {
 }
 const speedProfile = multiplier => ({ multiplier, sourceConcurrency: 1, sourceStartLimit: 1, metadataConcurrency: Math.round(12 * multiplier), uploadBatchSize: 60, uploadIntervalMs: 3000, sourceIntervalMs: Math.round(1000 / multiplier), outstandingLimit: 600 });
 const speedConfig = multiplier => ({ sourceConcurrency: 1, speedMultiplier: multiplier, collectionSpeed: speedProfile(multiplier) });
-const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.18', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
-function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.18', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.19', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
+function libraryHarness({ pageUrl = 'chrome-extension://test-extension/library.html', config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.19', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], requests = [], intervals = [], intervalDelays = [];
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -52,17 +52,28 @@ function libraryHarness({ config = {}, failSave = false, failFetch = false, scan
     else if (payload.type === 'getState') callback(scans);
     else callback({ ok: true, enabled: cloud.autoBrowse !== false, synced: 3, pending: 2, alreadyStored: 1, skippedPromptless: 4, ...browse });
   } } };
-  vm.runInNewContext(sourceControl + '\n' + library, { ISSDownloadControl: downloadStub, document: { getElementById: get }, chrome, URL, Date: { now: transport.now }, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout, clearInterval() {}, setInterval(fn, delay) { intervals.push(fn); intervalDelays.push(delay); }, fetch: async (url, options) => {
+  vm.runInNewContext(sourceControl + '\n' + library, { ISSDownloadControl: downloadStub, document: { getElementById: get }, location: { href: pageUrl }, chrome, URL, Date: { now: transport.now }, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout, clearInterval() {}, setInterval(fn, delay) { intervals.push(fn); intervalDelays.push(delay); }, fetch: async (url, options) => {
     requests.push({ url, options }); if (failFetch) throw new Error('offline');
     return { ok: true, status: 200, json: async () => ({ ok: true, counts: { total: 5, ready: 4, pending: 1 } }) };
   } });
   return { get, cloud, messages, requests, intervals, intervalDelays, transport };
 }
-function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.18', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+function panelHarness({ initialize = true, configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.19', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], events = {};
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
-  const root = new Element(); root.attachShadow = () => ({ getElementById: get, innerHTML: '' });
+  let root = null;
+  const document = {
+    getElementById() { return root?.isConnected ? root : null; },
+    createElement() {
+      elements.clear(); root = new Element(); root.isConnected = false;
+      root.remove = function () { this.isConnected = false; };
+      root.attachShadow = () => ({ getElementById: get, innerHTML: '' }); return root;
+    },
+    documentElement: { appendChild(node) { node.isConnected = true; } },
+    addEventListener(name, fn) { events[name] = fn; },
+    removeEventListener(name, fn) { if (events[name] === fn) delete events[name]; }
+  };
   const cloud = { ...speedConfig(1), ...config };
   const chrome = { runtime: { lastError: null, connect: transport.connect, sendMessage(payload, callback) {
     messages.push(payload); const reply = callback; callback = value => reply({ backgroundVersion, statusProtocol, ...value });
@@ -73,9 +84,45 @@ function panelHarness({ configured = true, config = {}, state = { status: {}, fe
     callback(payload.type === 'getConfig' ? { ...cloud, configured } : payload.type === 'getState' ? state : payload.type === 'civitai-auto-status' ? { ok: true, enabled: true, ...browse } : payload.type === 'getSourceStatus' ? {ok:true, ...source} : { ok: true });
   } } };
   const window = { __ISS_FEED_CAPTURE: { capture, cancel() {} } };
-  vm.runInNewContext(sourceControl + '\n' + panel, { ISSDownloadControl: downloadStub, document: { getElementById() { return null; }, createElement() { return root; }, documentElement: { appendChild() {} }, addEventListener(name, fn) { events[name] = fn; }, removeEventListener() {} }, window, AbortController, chrome, Date: { now: transport.now }, location: { href: 'https://civitai.red/models/42', hostname: 'civitai.red' }, performance: { getEntriesByType() { return []; } }, setInterval() {}, clearInterval() {}, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout });
-  return { get, messages, root, events, transport, window, cloud };
+  const context = vm.createContext({ ISSDownloadControl: downloadStub, document, window, AbortController, chrome, Date: { now: transport.now }, location: { href: 'https://civitai.red/models/42', hostname: 'civitai.red' }, performance: { getEntriesByType() { return []; } }, setInterval() {}, clearInterval() {}, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout });
+  vm.runInContext(sourceControl, context);
+  const inject = () => vm.runInContext(panel, context);
+  if (initialize) inject();
+  return { get, messages, get root() { return root; }, events, transport, window, cloud, context, inject };
 }
+
+test('toolbar reinjection toggles a connected panel without opening duplicate status ports', async () => {
+  const h = panelHarness(); await flush(); const root = h.root;
+  assert.equal(h.inject().ok, true); assert.equal(root.style.display, 'none');
+  assert.equal(h.inject().ok, true); assert.equal(root.style.display, 'block');
+  assert.equal(h.root, root); assert.equal(h.transport.ports.length, 1);
+});
+
+test('toolbar rebuilds a panel removed by Civitai page navigation', async () => {
+  const h = panelHarness(); await flush(); const root = h.root, port = h.transport.ports[0];
+  root.remove(); assert.equal(h.inject().ok, true); await flush();
+  assert.notEqual(h.root, root); assert.equal(h.root.isConnected, true);
+  assert.equal(port.disconnected, true); assert.equal(h.transport.ports.length, 2);
+  assert.equal(h.messages.some(message => ['start', 'stop', 'pauseAll'].includes(message.type)), false);
+});
+
+test('a failed panel mount clears its marker and a later click can recover', async () => {
+  const h = panelHarness({ initialize: false }); h.context.ISSDownloadControl = undefined;
+  assert.equal(h.inject().ok, false);
+  assert.equal(h.window.__ISS_PANEL_VERSION, undefined); assert.equal(h.root.isConnected, false);
+  h.context.ISSDownloadControl = downloadStub;
+  assert.equal(h.inject().ok, true); await flush(); assert.equal(h.root.isConnected, true);
+  assert.equal(h.transport.ports.length, 1);
+});
+
+test('a stale version marker and broken old disposer cannot prevent panel recovery', async () => {
+  const h = panelHarness(); await flush(); const root = h.root;
+  delete h.window.__ISS_TOGGLE_PANEL;
+  const dispose = h.window.__ISS_DISPOSE_PANEL;
+  h.window.__ISS_DISPOSE_PANEL = () => { dispose(); throw new Error('Extension context invalidated'); };
+  assert.equal(h.inject().ok, true); await flush();
+  assert.notEqual(h.root, root); assert.equal(h.root.isConnected, true);
+});
 test('fresh installation is ready without credentials and pins requests to shared HTTPS endpoint', async () => {
   const h = libraryHarness({ config: { apiBase: 'https://untrusted.example/api.php' } }); await flush();
   assert.equal(h.get('autoBrowse').checked, true); assert.equal(h.get('browseState').textContent, 'On');
@@ -85,6 +132,14 @@ test('fresh installation is ready without credentials and pins requests to share
   assert.equal(h.requests[0].options.redirect, 'error'); assert.equal(h.requests[0].options.credentials, 'omit');
   assert.equal(h.requests[0].options.headers.Authorization, undefined);
   assert.match(h.get('libraryHealth').textContent, /5 records indexed.*4 image files stored/);
+});
+
+test('activity fallback explains a failed panel opening without disturbing saved collection', async () => {
+  const normal = libraryHarness();
+  const fallback = libraryHarness({ pageUrl: 'chrome-extension://test-extension/library.html?panelError=1' }); await flush();
+  assert.equal(normal.get('panelOpenError').hidden, true);
+  assert.equal(fallback.get('panelOpenError').hidden, false);
+  assert.equal(fallback.messages.some(message => ['start', 'stop', 'pauseAll'].includes(message.type)), false);
 });
 
 test('browsing preference saves only its boolean without a setup request', async () => {
@@ -133,7 +188,7 @@ test('public UI has no connection form or credential fields', () => {
   assert.doesNotMatch(html, /contributorKey|connectionForm|type="password"|Disconnect/);
   assert.doesNotMatch(library, /writeToken|Authorization|writer-status|chrome\.storage/);
   assert.doesNotMatch(panel, /contributor key|Contributor connection|Connection &amp; browsing/);
-  assert.match(panel, /Browsing &amp; activity/); assert.match(html, /2\.8\.17/);
+  assert.match(panel, /Browsing &amp; activity/); assert.match(html, /2\.8\.19/);
 });
 
 test('panel starts only selected feed and offers resume for saved stopped progress', async () => {
@@ -297,7 +352,7 @@ test('settings push updates combined queues immediately without polling or serve
   h.transport.ports[0].emit(pushed({ state: { activeTabs: 2, status: { pending: 7, processed: 9, catalogSynced: 6 }, runs: [] }, browse: { pending: 4, pendingTotal: 4, synced: 8, processed: 12, phase: 'reading prompts' } }));
   assert.equal(h.get('pendingCount').textContent, '11'); assert.equal(h.get('syncedCount').textContent, '14');
   assert.match(h.get('queueBreakdown').textContent, /4 automatic · 7 feed/); assert.match(h.get('activityDetails').textContent, /21 processed · 14 accepted.*reading prompts/);
-  assert.match(h.get('connectionStatus').textContent, /Background 2\.8\.17 · Live/);
+  assert.match(h.get('connectionStatus').textContent, /Background 2\.8\.19 · Live/);
   assert.equal(h.messages.length, messages); assert.equal(h.requests.length, requests);
   await h.intervals[0](); assert.equal(h.messages.length, messages, 'A healthy port replaces polling');
 });

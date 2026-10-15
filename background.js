@@ -5,7 +5,7 @@ importScripts('state-checkpoint.js', 'collection-speed.js', 'download-settings.j
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.18', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.19', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -1008,8 +1008,8 @@ function isCivitaiSender(sender) {
   return Number.isInteger(sender?.tab?.id) && (sender.frameId == null || sender.frameId === 0) &&
     !!ISSBrowseCollector.page(sender.url || sender.tab.url);
 }
-function openLibrary() {
-  return new Promise(resolve => chrome.tabs.create({ url: chrome.runtime.getURL('library.html'), active: true }, tab => {
+function openLibrary(panelError = false) {
+  return new Promise(resolve => chrome.tabs.create({ url: chrome.runtime.getURL('library.html' + (panelError ? '?panelError=1' : '')), active: true }, tab => {
     const error = chrome.runtime.lastError; resolve(error ? { ok: false, error: error.message } : { ok: true, tabId: tab?.id });
   }));
 }
@@ -1135,8 +1135,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.runtime.onConnect.addListener(connectStatusPort);
 chrome.action.onClicked.addListener(async tab => {
   if (!ISSBrowseCollector.page(tab?.url)) { await openLibrary(); return; }
-  try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-feed-capture.js', 'download-control.js', 'source-control.js', 'panel.js'] }); }
-  catch (error) { addDebug('panel-error', error.message); }
+  try {
+    const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-feed-capture.js', 'download-control.js', 'source-control.js', 'panel.js'] });
+    const result = results?.[0]?.result;
+    if (!result?.ok || result.panelVersion !== BACKGROUND_VERSION) throw new Error(result?.error || 'The collection panel did not finish opening.');
+    await Promise.allSettled([chrome.action.setBadgeText({ tabId: tab.id, text: '' }), chrome.action.setTitle({ tabId: tab.id, title: 'Index Civitai' })]);
+  } catch (error) {
+    addDebug('panel-error', error.message);
+    await Promise.allSettled([
+      chrome.action.setBadgeText({ tabId: tab.id, text: '!' }),
+      chrome.action.setTitle({ tabId: tab.id, title: 'Index Civitai: refresh this Civitai tab and try again.' }),
+      openLibrary(true)
+    ]);
+  }
 });
 chrome.alarms.onAlarm.addListener(alarm => {
   ready.then(() => ['iss-active-run', 'civitai-auto-browse'].includes(alarm.name) ? collectionClockPulse() : undefined)

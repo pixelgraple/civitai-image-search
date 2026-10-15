@@ -1,16 +1,20 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.18', ROOT_ID = '__iss_panel_root';
-  if (window.__ISS_PANEL_VERSION === VERSION) { window.__ISS_TOGGLE_PANEL?.(); return; }
-  window.__ISS_DISPOSE_PANEL?.();
-  document.getElementById(ROOT_ID)?.remove();
-  window.__ISS_PANEL_VERSION = VERSION;
+  const VERSION = '2.8.19', ROOT_ID = '__iss_panel_root';
+  const previousRoot = document.getElementById(ROOT_ID);
+  if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
+    try { window.__ISS_TOGGLE_PANEL(); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
+  }
+  try { window.__ISS_DISPOSE_PANEL?.(); } catch { /* An old extension context may be invalid. */ }
+  previousRoot?.remove();
+  delete window.__ISS_PANEL_VERSION; delete window.__ISS_TOGGLE_PANEL; delete window.__ISS_DISPOSE_PANEL;
   let state = null, browse = null, source = null, message = '', messageError = false;
   let starting = false, refreshing = false, disposed = false, settingsOpen = false, autoSaving = false;
   let startEpoch = 0, captureController = null;
   let backgroundVersion = '', statusProtocol = 0, workerChecked = false, statusPort = null, portReady = false, reconnectTimer = null, handshakeTimer = null, reconnectAttempts = 0, revision = 0;
   const root = document.createElement('div'); root.id = ROOT_ID;
+  try {
   const panel = root.attachShadow({ mode: 'open' });
   panel.innerHTML = `
     <style>
@@ -251,5 +255,13 @@
   window.__ISS_TOGGLE_PANEL = () => { root.style.display = root.style.display === 'none' ? 'block' : 'none'; refresh(); };
   window.__ISS_DISPOSE_PANEL = () => { disposed = true; speedControl.dispose(); sourceControl.dispose(); downloadControl.dispose(); ++startEpoch; captureController?.abort(); clearInterval(timer); clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); disconnectStatus(statusPort, true); document.removeEventListener('visibilitychange', visible); document.removeEventListener('keydown', escape, true); root.remove(); };
   render(); connectStatus(); refresh();
+  window.__ISS_PANEL_VERSION = VERSION;
+  return { ok: true, panelVersion: VERSION };
+  } catch (error) {
+    try { window.__ISS_DISPOSE_PANEL?.(); } catch { /* Always clear a failed mount. */ }
+    root.remove();
+    delete window.__ISS_PANEL_VERSION; delete window.__ISS_TOGGLE_PANEL; delete window.__ISS_DISPOSE_PANEL;
+    return { ok: false, error: String(error?.message || 'Could not open the collection panel.').slice(0, 300) };
+  }
 })();
 
