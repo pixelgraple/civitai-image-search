@@ -224,6 +224,42 @@ style_fixture('negation does not swallow new positive sentence', 'anime', 'No ar
 style_fixture('commercial photographic styling is not art medium', 'realistic', 'source_anime. Stylized commercial photography.', '', [], [], ['anime']);
 style_fixture('photographic adjective does not erase explicit illustration', 'anime', 'A stylized photographic illustration.', '', [], [], ['stylization','illustration']);
 
+// v9: neutral subjects retain the style evidence in reported catalog examples.
+style_fixture('reported Disney selfie 70906466', 'anime', 'DISNEY_ANIMATION, phone selfie, depth of field.', 'WAI-illustrious-SDXL', ['Disney Animation [Illustrious & Pony]'], [], ['animation','illustration-family']);
+style_fixture('reported Gelatomusume 88373746', 'anime', 'masterpiece, best quality, solo focus, 1girl, lucoa, g3l4t0musum3, <lora:GELATOMUSUME_Style_IL:1>', 'WAI-illustrious-SDXL', ['Gelatomusume Style','IL v1.0'], [], ['illustration-family','illustrator-adapter']);
+style_fixture('reported animation adapter', 'anime', 'masterpiece, depth of field. <lora:ppw_v7_animv4_1_r2:0.6> <lora:illustrious_all_rated_v1:0.6>', 'Prefect illustrious XL', ["People's Works: SDXL",'v7_Animv4'], [], ['illustration-family','animation']);
+style_fixture('reported explicit anime prompt with family', 'anime', 'masterpiece, anime, studio photography.', 'WAI-illustrious-SDXL', [], [], ['anime','illustration-family']);
+style_fixture('reported ultra realistic anime and ecchi', 'anime', 'ultra realistic, high detailed skin, anime style, studio anime, source_ecchi, anime, smartphone selfie.', '', [], [], ['anime','ecchi']);
+style_fixture('reported flat colors and drawn movement', 'anime', 'flat colors, motion lines, motion blur, depth of field.', '', [], [], ['flat-color','motion-lines']);
+style_fixture('ecchi variants are one cue', 'realistic', 'ecchi, source_ecchi, ecchi.', '', [], ['source_ecchi'], ['ecchi']);
+style_fixture('motion line variants are one cue', 'realistic', 'motion lines, speed_lines, action lines.', '', [], [], ['motion-lines']);
+style_fixture('photographic motion blur supplies no drawn cue', 'realistic', 'source_anime, candid photograph, motion blur, camera trails.', '', [], [], ['anime']);
+style_fixture('quality and subject tags are not style evidence', 'realistic', 'masterpiece, best quality, amazing quality, 1girl, solo, looking at viewer, lucoa, g3l4t0musum3.');
+style_fixture('model alone does not establish anime', 'realistic', 'Photograph, natural skin texture.', 'WAI-illustrious-SDXL', [], [], ['illustration-family']);
+style_fixture('NoobAI variant supports independent anime cue', 'anime', 'source_anime.', 'NoobAI-XL', [], [], ['anime','illustration-family']);
+style_fixture('family variants repeated across resources count once', 'realistic', 'Photograph.', 'Illustrious XL', ['Illustrious','NoobAI-XL','SDXL_Illustrious-XL'], [], ['illustration-family']);
+style_fixture('family names in prose and tags supply no family cue', 'realistic', 'Photograph of an illustrious artist, noobai printed on a poster.', '', [], ['illustrious','NoobAI']);
+style_fixture('LoRA compatibility list cannot identify actual checkpoint', 'realistic', 'source_anime. Photographic portrait.', 'Krea2', ['Hands XL + SD 1.5 + F1D + Pony + Illustrious + zit + ZIB'], [], ['anime']);
+style_fixture('LoRA version label alone cannot identify actual checkpoint', 'realistic', 'source_anime. Photographic portrait.', 'FLUX', ['Illustrious','NoobAI-XL'], [], ['anime']);
+style_fixture('realistic portrait wording does not erase independent anime evidence', 'anime', 'Ultra realistic portrait, realistic skin texture, natural lighting, anime style, cel shading.', 'Krea2', [], [], ['anime','cel-shading']);
+style_fixture('negated family name is not evidence', 'realistic', 'source_anime.', 'No Illustrious', [], [], ['anime']);
+style_fixture('generic IL abbreviation supplies no family cue', 'realistic', 'Portrait.', '', ['IL v1.0','StyleIL','An unrelated style adapter']);
+style_fixture('Gelatomusume display resource recognized', 'anime', 'Anime portrait.', '', ['Gelatomusume Style','IL v1.0'], [], ['anime','illustrator-adapter']);
+style_fixture('Gelatomusume alone still needs another cue', 'realistic', '<lora:GELATOMUSUME_Style_IL:1>', '', ['Gelatomusume Style'], [], ['illustrator-adapter']);
+style_fixture('artist name in prose is not an active adapter', 'realistic', 'Photograph, Gelatomusume Style, Incase, Artist: Ilya Kuvshinov.');
+foreach (['0','-1','0e0'] as $weight) {
+    style_fixture('disabled Gelatomusume alias '.$weight, 'realistic', 'Photograph. <lora:GELATOMUSUME_Style_IL:'.$weight.'>', 'WAI-illustrious-SDXL', ['Gelatomusume Style','IL v1.0'], [], ['illustration-family']);
+    style_fixture('disabled ppw alias '.$weight, 'realistic', 'Photograph. <lora:ppw_v7_animv4_1_r2:'.$weight.'>', 'Prefect illustrious XL', ["People's Works: SDXL",'v7_Animv4'], [], ['illustration-family']);
+}
+style_fixture('disabled outer Gelatomusume group suppresses display alias', 'realistic', 'Photograph. (<lora:GELATOMUSUME_Style_IL:1>:0)', 'WAI-illustrious-SDXL', ['Gelatomusume Style'], [], ['illustration-family']);
+style_fixture('positive Gelatomusume alias beats separate disabled use', 'anime', '<lora:GELATOMUSUME_Style_IL:0> <lora:Gelatomusume Style:0.6>', 'WAI-illustrious-SDXL', ['Gelatomusume Style'], [], ['illustration-family','illustrator-adapter']);
+style_fixture('disabled family adapter not resurrected', 'realistic', 'source_anime. <lora:Illustrious_All_Rated_v1:0>', '', ['Illustrious All Rated v1'], [], ['anime']);
+style_fixture('disabled ecchi cannot supplement anime', 'realistic', 'anime, (source_ecchi:0).', '', [], [], ['anime']);
+style_fixture('disabled motion lines cannot supplement flat colors', 'realistic', 'flat colors, (motion lines:0).', '', [], [], ['flat-color']);
+style_fixture('coordinated negated new cues are excluded', 'realistic', 'Photograph, no ecchi or motion lines or anime.');
+style_fixture('negated speed lines are excluded', 'realistic', 'anime, without speed lines.', '', [], [], ['anime']);
+style_fixture('drawn movement on clothing is a prop', 'realistic', 'source_anime. Photograph of a shirt with motion lines.', '', [], [], ['anime']);
+
 foreach ($fixtures as [$name,$expected,$prompt,$model,$loras,$tags,$expectedCues]) {
     try {
         $actual = classify_style($prompt,$model,$loras,$tags);
@@ -231,7 +267,7 @@ foreach ($fixtures as [$name,$expected,$prompt,$model,$loras,$tags,$expectedCues
         style_check(($actual['category'] ?? null) === $expected, $name.': expected '.$expected.', got '.($actual['category'] ?? 'missing'));
         style_check(is_numeric($actual['confidence'] ?? null) && $actual['confidence'] >= 0 && $actual['confidence'] <= 1, $name.': confidence must be between 0 and 1');
         style_check(is_array($actual['signals'] ?? null) && is_array($actual['scores'] ?? null), $name.': signals and scores must be present');
-        style_check(($actual['version'] ?? null) === 8, $name.': classifier evidence must identify version 8');
+        style_check(($actual['version'] ?? null) === 9, $name.': classifier evidence must identify version 9');
         style_check(in_array($actual['category'] ?? null, ['anime','realistic'], true), $name.': binary policy must not return uncertain');
         style_check(($actual['evidence']['animeCueMinimum'] ?? null) === 2, $name.': evidence must declare the two-cue threshold');
         style_check(($actual['evidence']['animeCueCount'] ?? null) === count($expectedCues), $name.': incorrect distinct cue count; expected '.count($expectedCues).', got '.($actual['evidence']['animeCueCount'] ?? 'missing'));

@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-const CIVITAI_STYLE_CLASSIFIER_VERSION = 8;
+const CIVITAI_STYLE_CLASSIFIER_VERSION = 9;
 const CIVITAI_STYLE_ANIME_MINIMUM_CUES = 2;
 
 /** Library sorting policy, not visual inspection or a statistical probability. */
@@ -17,6 +17,7 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
         ['manhwa', 'manhwa medium', 'manhwa|webtoon', 6],
         ['manhua', 'manhua medium', 'manhua', 6],
         ['hentai', 'hentai medium', '(?:source[ -]+)?hentai', 6],
+        ['ecchi', 'ecchi style', '(?:source[ -]+)?ecchi', 3],
         ['cartoon', 'cartoon medium', '(?:source[ -]+)?cartoons?|cartoonish|cartoony|toon(?:[ -](?:art|style))?', 6],
         ['animation', 'animation medium', '(?:2[ -]?d[ -]+)?animat(?:ion|ed)(?:[ -]+(?:film|movie|style))?|(?:pixar|dream[ -]?works|disney|ghibli|illumination)(?:[ -](?:inspired|like))?(?:[ -](?:3[ -]?d|animated|animation|cartoon))?[ -](?:style|animation|animated(?: film)?|look|aesthetic)', 6],
         ['illustration', 'illustrated medium', '(?:(?:digital|editorial|book|fashion|children[’\x27]s)[ -]+)?illustrat(?:ion|ions|ed)(?:[ -]style)?|concept[ -]art|key[ -]visual', 6],
@@ -29,6 +30,7 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
         ['line-art', 'line art', 'line[ -]?art|line[ -]drawing|contour[ -]drawing', 5],
         ['ink-outline', 'inked outlines', '(?:thick|bold|heavy|clean|inked)[ -]+(?:black[ -]+)?outlines?|inked[ -]lines|inking', 3],
         ['flat-color', 'flat colors', 'flat[ -]colou?rs?|flat[ -]shad(?:ed|ing)|solid[ -]colou?r[ -]fills?', 3],
+        ['motion-lines', 'drawn motion lines', '(?:motion|speed|action)[ -]lines', 3],
         ['pixel-art', 'pixel art', 'pixel[ -]art|pixelated[ -]art|pixel[ -]sprites?|sprite[ -]art|(?:8|16|32)[ -]bit[ -](?:art|style|graphics)', 6],
         ['vector-art', 'vector art', 'vector(?:[ -](?:art|illustration|drawing|graphics))?|(?:svg|eps)[ -](?:art|illustration)', 6],
         ['cgi', 'CG rendering', '(?:3[ -]?d|computer)[ -]animat(?:ed|ion)(?:[ -]film)?|(?:3[ -]?d|cg|cgi|computer[ -]generated)(?:[ -](?:art(?:work)?|imagery|graphics|render(?:ing)?|illustration|model(?:ing)?))?|(?:ray|path)[ -]traced[ -]render(?:ing)?|(?:octane|redshift|blender|cinema[ -]4d|unreal[ -]engine|daz[ -](?:studio|3d)|poser)[ -](?:render(?:ing)?|art)|zbrush[ -]sculpt', 6],
@@ -80,7 +82,21 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
         // Civitai's generic 3d label also appears on photographic images. It
         // cannot identify a drawn medium; explicit "3D render"/CGI still can.
         if ($source === 'tag' && preg_match('~^(?:source[ -]+)?3[ -]?d$~u', trim($text))) continue;
-        foreach (style_distinct_art_matches($text, $artRules, $source === 'prompt') as $match) {
+        $sourceRules = $artRules;
+        // A model family is supporting evidence, never a classification by
+        // itself. LoRA titles often list compatibility with unrelated model
+        // families; use the recorded checkpoint, not those compatibility lists.
+        // Illustrious and its NoobAI derivative share one canonical cue.
+        if ($source === 'model') {
+            $sourceRules[] = ['illustration-family', 'illustration model family', 'illustrious(?:[ -]xl)?|noob[ -]?ai(?:[ -]xl)?', 3];
+        }
+        if ($source === 'lora') {
+            // Bounded aliases observed in the reported catalog examples. Do
+            // not infer illustration from arbitrary artist names or "style".
+            $sourceRules[] = ['illustrator-adapter', 'recognized illustration style adapter', '^gelatomusume[ -]+style(?:[ -]+il)?$', 5];
+            $sourceRules[] = ['animation', 'animation style adapter', '^(?:ppw[ -]+)?v7[ -]+animv4(?:[ -]+1[ -]+r2)?$', 5];
+        }
+        foreach (style_distinct_art_matches($text, $sourceRules, $source === 'prompt') as $match) {
             [$cue, $label, $term, $strength] = $match;
             // One canonical cue across the entire record. A copied tag, model
             // suffix, LoRA name or repeated prompt word never adds another vote.
@@ -130,7 +146,12 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
 /** Match the same resource copied as a filename, display name or inline token. */
 function style_lora_identity(string $name): string {
     $name = preg_replace('~\.(?:safetensors|ckpt|pt|bin)$~iu', '', trim($name)) ?? $name;
-    return preg_replace('~[^\p{L}\p{N}]+~u', '', lower_text($name)) ?? '';
+    $key = preg_replace('~[^\p{L}\p{N}]+~u', '', lower_text($name)) ?? '';
+    // These display names and filenames refer to the same reported adapters.
+    // A zero-weight token must also suppress its separately captured label.
+    if (in_array($key, ['gelatomusumestyle','gelatomusumestyleil'], true)) return 'gelatomusumestyle';
+    if (in_array($key, ['ppwv7animv41r2','v7animv4'], true)) return 'ppwv7animv4';
+    return $key;
 }
 
 /** Prompt weights are authoritative over the collector's unweighted name list.
@@ -226,6 +247,7 @@ function style_positive_matches(string $text, string $pattern, bool $ignoreProps
         // Deliberately bounded vocabulary: "not anime but a photo" keeps photo,
         // while "no anime or cartoon" and "not a photo" suppress the negated cues.
         $negatedStyleWord = 'a|an|any|the|explicit|artificial|filter|filters|effect|effects|stylization|stylisation|style|styles|tags|containing|references|to|of|look|like|rendered|as|and|or|source|ai|anime|animesque|japanimation|japanese|manga|manhwa|manhua|webtoon|hentai|fantasy|fantastical|cartoon|cartoons|cartoonish|cartoony|toon|photo|photographic|photorealistic|realistic|digital|comic|comics|book|art|artwork|illustration|illustrations|illustrated|drawing|drawings|drawn|hand|sketch|sketches|sketched|sketching|painting|paintings|painted|oil|acrylic|gouache|watercolor|watercolour|charcoal|graphite|ink|pencil|cgi|cg|3d|2d|3|2|d|computer|generated|animation|animated|film|movie|render|rendering|pixar|dreamworks|disney|ghibli|cel|cell|shaded|shading|line|lineart|outlines|flat|colors|colours|pixel|pixelated|sprites|vector|graphics|stylized|stylised|low|poly|polygon|voxel|claymation|clay|stop|motion|paper|papercut|origami|woodcut|linocut|lithograph|engraving|etching|halftone|screentone|cross|hatching|crosshatching|stippled|stippling|game|video|visual|novel|jrpg|chibi|super|deformed|anthro|anthropomorphic|anthromorphic|furry|character|waifu|vtuber|kemonomimi|nekomimi';
+        $negatedStyleWord .= '|ecchi|speed|action|lines|illustrious|noob|ai|xl|gelatomusume';
         if (preg_match('~(?:\b(?:no|not|without|avoid|avoiding|exclude|excluding|remove|removing|omit|omitting)\b(?:[\s-]+(?:'.$negatedStyleWord.')){0,12}[\s-]+|\bnon[ -]*)$~u', $prefix)) continue;
         if (preg_match('~\b(?:non|no|not)[ -]+photo[ -]*$~u', $prefix)) continue;
         // Descriptions of an absent optical effect do not supply a positive

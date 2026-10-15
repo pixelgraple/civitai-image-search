@@ -246,6 +246,30 @@ with tempfile.TemporaryDirectory(prefix='civitai-reclass-') as temporary:
     check(invariant() == disabled_before, 'disabled LoRA remains searchable and all non-style fields are preserved')
     disabled_again = run('--online', '--apply')
     check(disabled_again['updatedStyleMetadata'] == 0, 'disabled-resource correction is idempotent')
+    # v9: active adapter/model evidence moves illustrated portraits into Anime;
+    # a copied display label cannot revive the same adapter at zero weight.
+    for ident, prompt, loras in [
+        ('91', 'Ultra realistic portrait. <lora:GELATOMUSUME_Style_IL:1>', ['Gelatomusume Style', 'IL v1.0']),
+        ('92', 'Photographic portrait. <lora:GELATOMUSUME_Style_IL:0>', ['Gelatomusume Style', 'IL v1.0']),
+        ('93', 'DISNEY_ANIMATION, phone selfie.', ['Disney Animation [Illustrious & Pony]']),
+    ]:
+        db.execute('UPDATE images SET prompt=?,model_name=?,loras_json=?,tags_json=?,style_category=? WHERE image_id=?',
+                   (prompt, 'WAI-illustrious-SDXL', json.dumps(loras), '[]', 'realistic' if ident != '92' else 'anime', ident))
+    db.commit()
+    resources_before = invariant()
+    resources_preview = run('--online')
+    check(resources_preview['changedCategories'] == 3 and resources_preview['classifierVersion'] == 9,
+          'v9 previews active resource and disabled display-alias corrections')
+    resources_applied = run('--online', '--apply')
+    check(resources_applied['ok'] and resources_applied['changedCategories'] == 3,
+          'v9 applies precisely the three resource corrections')
+    check(categories() == {'91': 'anime', '92': 'realistic', '93': 'anime', '94': 'realistic'},
+          'active illustration resources overcome portrait wording; disabled resources remain excluded')
+    check(invariant() == resources_before, 'v9 preserves every non-style column, FTS row and community reaction')
+    resources_again = run('--online', '--apply')
+    check(resources_again['changedCategories'] == 0 and resources_again['updatedStyleMetadata'] == 0,
+          'v9 resource corrections are idempotent')
+    check(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'v9 preserves catalog integrity')
     db.close()
 
 print(json.dumps({'ok': True, 'suite': 'reclassification', 'checks': checks, 'productionTouched': False}))
