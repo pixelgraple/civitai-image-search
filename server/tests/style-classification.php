@@ -195,6 +195,35 @@ style_fixture('positive inline single cue still stays one', 'realistic', '<lora:
 style_fixture('disabled group cannot suppress separate positive pair', 'anime', '((cartoon:1.2):0), anime illustration.', '', [], [], ['anime','illustration']);
 style_fixture('photo object metadata supplies no art evidence', 'realistic', 'source_anime.', '', [], ['photo (object)','photo background'], ['anime']);
 
+// v8: neutral descriptions reproduce the metadata failures in reported records.
+style_fixture('reported lake photograph 145674491', 'realistic', 'Analog amateur photograph of an adult swimming in a lake.', 'Krea 2 CyberRealistic', ['Girly Plus Size Fantasy'], ['3d','realistic','photorealistic'], ['fantasy']);
+style_fixture('reported negation 145634454', 'realistic', 'Ultra-photorealistic cinematic portrait, realistic skin texture, no artificial filters or stylization.', 'Krea2 - DarkRealism', ['Krea2 Ultra Realism'], ['3d','realistic']);
+$disabledAnimeResource = 'DC_Fractured_Anime__Krea2Raw__GPT4_1Captioned__Trigger_DCFRCANMA___Rank32__v1_krea2_3325529_epoch_12';
+$reportedResources = '<lora:realism_engine_krea2_v2:0.9> <lora:'.$disabledAnimeResource.':0> <lora:Mrpopo anime full potential:0>';
+style_fixture('reported commercial photograph 145590806', 'realistic', 'The overall style is deliberate and stylized, typical of commercial photography, with careful composition. '.$reportedResources, 'Krea 2 Turbo', [$disabledAnimeResource,'Mrpopo anime full potential','Realism Engine'], ['3d','photorealistic','photography']);
+style_fixture('reported posed photograph 145590804', 'realistic', 'An adult seated on a red lounge chair. Camera angle slightly elevated, soft ambient light, controlled depth of field. '.$reportedResources, 'Krea 2 Turbo', [$disabledAnimeResource,'Mrpopo anime full potential','Realism Engine'], ['3d','photorealistic','photography']);
+foreach (['0','0.000','-0','+0','.0','0e0','0e-3','-1','-.5'] as $weight) {
+    style_fixture('disabled metadata cannot resurrect '.$weight, 'realistic', 'source_anime. <lora:MangaStyle:'.$weight.'>', '', ['MangaStyle'], [], ['anime']);
+    style_fixture('disabled full resource metadata '.$weight, 'realistic', 'source_anime.', '', ['<lora:MangaStyle:'.$weight.'>'], [], ['anime']);
+}
+style_fixture('disabled metadata filename display alias', 'realistic', 'Photograph. <lora:Anime_Hentai_Model:0>', '', ['ANIME HENTAI MODEL.safetensors']);
+style_fixture('disabled LyCORIS metadata', 'realistic', 'Photograph. <lyco:AnimeHentai:0>', '', ['AnimeHentai']);
+style_fixture('outer disabled group excludes duplicate resource metadata', 'realistic', 'source_anime. (<lora:MangaStyle:1>:0)', '', ['MangaStyle'], [], ['anime']);
+style_fixture('active resource after disabled duplicate remains evidence', 'anime', '<lora:AnimeHentai:0> <lora:AnimeHentai:0.5>', '', ['AnimeHentai'], [], ['anime','hentai']);
+style_fixture('disabled duplicate after active resource stays active', 'anime', '<lora:AnimeHentai:0.5> <lora:AnimeHentai:0>', '', ['AnimeHentai'], [], ['anime','hentai']);
+style_fixture('positive exponent resource remains active', 'anime', '<lora:AnimeHentai:1e-2>', '', [], [], ['anime','hentai']);
+style_fixture('zero dual resource weights are disabled', 'realistic', '<lora:AnimeHentai:0:0>', '', ['AnimeHentai']);
+style_fixture('one positive dual resource weight remains active', 'anime', '<lora:AnimeHentai:0:0.5>', '', ['AnimeHentai'], [], ['anime','hentai']);
+style_fixture('disabled resource does not suppress unrelated active name', 'anime', '<lora:AnimeHentai:0>', '', ['AnimeHentaiPlus'], [], ['anime','hentai']);
+style_fixture('disabled resource does not negate explicit prompt art', 'anime', 'Anime illustration. <lora:AnimeHentai:0>', '', ['AnimeHentai'], [], ['anime','illustration']);
+style_fixture('generic 3d tag cannot supplement source anime', 'realistic', 'source_anime, photograph.', '', [], ['3d','source_3d','3-d'], ['anime']);
+style_fixture('explicit rendering tag remains valid', 'anime', 'source_anime.', '', [], ['3D render'], ['anime','cgi']);
+style_fixture('explicit rendering prompt remains valid', 'anime', '3D render, cartoon landscape.', '', [], ['3d'], ['cgi','cartoon']);
+style_fixture('negated filters cannot supply second cue', 'realistic', 'source_anime, no artificial filters or stylization.', '', [], [], ['anime']);
+style_fixture('negation does not swallow new positive sentence', 'anime', 'No artificial filters. Anime illustration.', '', [], [], ['anime','illustration']);
+style_fixture('commercial photographic styling is not art medium', 'realistic', 'source_anime. Stylized commercial photography.', '', [], [], ['anime']);
+style_fixture('photographic adjective does not erase explicit illustration', 'anime', 'A stylized photographic illustration.', '', [], [], ['stylization','illustration']);
+
 foreach ($fixtures as [$name,$expected,$prompt,$model,$loras,$tags,$expectedCues]) {
     try {
         $actual = classify_style($prompt,$model,$loras,$tags);
@@ -202,7 +231,7 @@ foreach ($fixtures as [$name,$expected,$prompt,$model,$loras,$tags,$expectedCues
         style_check(($actual['category'] ?? null) === $expected, $name.': expected '.$expected.', got '.($actual['category'] ?? 'missing'));
         style_check(is_numeric($actual['confidence'] ?? null) && $actual['confidence'] >= 0 && $actual['confidence'] <= 1, $name.': confidence must be between 0 and 1');
         style_check(is_array($actual['signals'] ?? null) && is_array($actual['scores'] ?? null), $name.': signals and scores must be present');
-        style_check(($actual['version'] ?? null) === 7, $name.': classifier evidence must identify version 7');
+        style_check(($actual['version'] ?? null) === 8, $name.': classifier evidence must identify version 8');
         style_check(in_array($actual['category'] ?? null, ['anime','realistic'], true), $name.': binary policy must not return uncertain');
         style_check(($actual['evidence']['animeCueMinimum'] ?? null) === 2, $name.': evidence must declare the two-cue threshold');
         style_check(($actual['evidence']['animeCueCount'] ?? null) === count($expectedCues), $name.': incorrect distinct cue count; expected '.count($expectedCues).', got '.($actual['evidence']['animeCueCount'] ?? 'missing'));

@@ -236,6 +236,16 @@ with tempfile.TemporaryDirectory(prefix='civitai-reclass-') as temporary:
           'online uncertain-only apply is idempotent')
     check(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'catalog integrity preserved')
     check(not db.execute('PRAGMA foreign_key_check').fetchall(), 'community image references remain valid')
+    # Reclassify disabled adapters without deleting searchable resource names.
+    db.execute("UPDATE images SET prompt=?,loras_json=?,tags_json=?,style_category='anime' WHERE image_id='91'",
+               ('Commercial photograph. <lora:Anime_Hentai:0>', json.dumps(['Anime_Hentai']), json.dumps(['3d','photorealistic'])))
+    db.commit()
+    disabled_before = invariant()
+    corrected = run('--online', '--apply')
+    check(corrected['ok'] and categories()['91'] == 'realistic', 'backfill ignores disabled LoRA duplicated in stored metadata')
+    check(invariant() == disabled_before, 'disabled LoRA remains searchable and all non-style fields are preserved')
+    disabled_again = run('--online', '--apply')
+    check(disabled_again['updatedStyleMetadata'] == 0, 'disabled-resource correction is idempotent')
     db.close()
 
 print(json.dumps({'ok': True, 'suite': 'reclassification', 'checks': checks, 'productionTouched': False}))

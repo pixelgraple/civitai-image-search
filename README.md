@@ -141,9 +141,9 @@ This repair runs on the server without requiring contributors to keep browser ta
 
 ### Anime and Realistic are metadata groups
 
-Classifier v7 requires **at least two distinct affirmative non-photographic style cues** for **Anime**. It reads positive prompts, tags, model names and LoRA names; otherwise it defaults to **Realistic**. For example, `source_anime` alone stays Realistic, while anime plus cel shading can qualify as Anime. Repeated words, spelling variants and the same cue repeated across metadata fields count only once. Overlapping words in one style phrase do not manufacture extra evidence.
+Classifier v8 requires **at least two distinct affirmative non-photographic style cues** for **Anime**. It reads positive prompts, tags, model names and LoRA names; otherwise it defaults to **Realistic**. For example, `source_anime` alone stays Realistic, while anime plus cel shading can qualify as Anime. Repeated words, spelling variants and the same cue repeated across metadata fields count only once. Overlapping words in one style phrase do not manufacture extra evidence.
 
-Separate negative prompts and disabled or zero-weight prompt resources do not provide positive cues. Ordinary references to a digital camera, artwork on a prop or phrases such as “drawing attention” are excluded from art-style detection.
+Separate negative prompts and disabled or zero-weight prompt resources do not provide positive cues. Disabled LoRAs stay excluded even when the collector also saved their names separately; positive uses of the same resource still count. Generic `3d` tags, negated stylization and styling described as commercial photography do not establish an illustrated medium. Ordinary references to a digital camera, artwork on a prop or phrases such as “drawing attention” are excluded from art-style detection.
 
 These are broad library sorting choices, **not visual image analysis or calibrated confidence scores**. For example, a fantasy render can fall under Anime. The Uncertain filter remains for older records awaiting reclassification.
 

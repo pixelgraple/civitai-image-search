@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-const CIVITAI_STYLE_CLASSIFIER_VERSION = 7;
+const CIVITAI_STYLE_CLASSIFIER_VERSION = 8;
 const CIVITAI_STYLE_ANIME_MINIMUM_CUES = 2;
 
 /** Library sorting policy, not visual inspection or a statistical probability. */
@@ -62,16 +62,9 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
         ['realistic', 'film texture', 'film grain|analog film|analogue film|35 ?mm film', 2, false],
         ['realistic', 'natural lighting', 'natural (?:light(?:ing)?|daylight)|warm indoor light(?:ing)?|window light(?:ing)?|soft daylight|ambient light(?:ing)?', 1, false],
     ];
-    $prompt = style_without_disabled_groups($prompt);
-    $inlineLoras = [];
-    // Disabled resources cannot supply positive style evidence.
-    $prompt = preg_replace_callback('~<(?:lora|lyco):([^<>]+):\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*>~iu', static function(array $match) use (&$inlineLoras): string {
-        if ((float)$match[2] > 0) $inlineLoras[] = $match[1];
-        return ' ';
-    }, $prompt) ?? $prompt;
+    [$prompt, $activeLoras, $disabledLoras] = style_active_loras($prompt, $loras);
     $sources = [['prompt', $prompt, 1], ['model', $model, 2]];
-    foreach ($inlineLoras as $text) $sources[] = ['lora', $text, 2];
-    foreach ($loras as $text) if (is_string($text)) $sources[] = ['lora', $text, 2];
+    foreach ($activeLoras as $text) $sources[] = ['lora', $text, 2];
     foreach ($tags as $text) if (is_string($text)) $sources[] = ['tag', $text, 1];
     $scores = ['anime'=>0, 'realistic'=>0];
     $strong = ['anime'=>false, 'realistic'=>false];
@@ -84,6 +77,9 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
         $text = lower_text(str_replace(['_', '–', '—', '‑'], [' ', '-', '-', '-'], $raw));
         $text = style_without_disabled_groups($text);
         if ($source === 'tag' && preg_match('~^(?:photo(?:graph)? \(object\)|photo background)$~u', trim($text))) continue;
+        // Civitai's generic 3d label also appears on photographic images. It
+        // cannot identify a drawn medium; explicit "3D render"/CGI still can.
+        if ($source === 'tag' && preg_match('~^(?:source[ -]+)?3[ -]?d$~u', trim($text))) continue;
         foreach (style_distinct_art_matches($text, $artRules, $source === 'prompt') as $match) {
             [$cue, $label, $term, $strength] = $match;
             // One canonical cue across the entire record. A copied tag, model
@@ -127,8 +123,53 @@ function classify_prompt_style(string $prompt, string $model, array $loras, arra
         $confidence = round(min(0.95, ($strong[$category] ? 0.78 : 0.60) + min(0.12, $margin / 100) + min(0.05, max(0, count($families[$category])-1) * 0.02)), 2);
     }
     return ['category'=>$category,'confidence'=>$confidence,'signals'=>$signals,'scores'=>$scores,
-        'evidence'=>['animeCueCount'=>$cueCount,'animeCueMinimum'=>CIVITAI_STYLE_ANIME_MINIMUM_CUES,'animeCues'=>array_keys($artCues)],
+        'evidence'=>['animeCueCount'=>$cueCount,'animeCueMinimum'=>CIVITAI_STYLE_ANIME_MINIMUM_CUES,'animeCues'=>array_keys($artCues),'disabledLoras'=>$disabledLoras],
         'version'=>CIVITAI_STYLE_CLASSIFIER_VERSION];
+}
+
+/** Match the same resource copied as a filename, display name or inline token. */
+function style_lora_identity(string $name): string {
+    $name = preg_replace('~\.(?:safetensors|ckpt|pt|bin)$~iu', '', trim($name)) ?? $name;
+    return preg_replace('~[^\p{L}\p{N}]+~u', '', lower_text($name)) ?? '';
+}
+
+/** Prompt weights are authoritative over the collector's unweighted name list.
+ * Keep names/search metadata intact; exclude disabled resources only as evidence.
+ * A separate positive use of the same resource remains active.
+ */
+function style_active_loras(string $prompt, array $loras): array {
+    $number = '[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?';
+    $pattern = '~<(?:lora|lyco):([^<>]+?):\s*('.$number.')\s*(?::\s*('.$number.')\s*)?>~iu';
+    $states = []; $names = []; $active = [];
+    // Discover names before blanking outer disabled groups, otherwise metadata
+    // could resurrect a positive token inside an explicitly disabled group.
+    preg_match_all($pattern, $prompt, $original, PREG_SET_ORDER);
+    foreach ($original as $match) {
+        $key = style_lora_identity($match[1]);
+        $states[$key] = false; $names[$key] = trim($match[1]);
+    }
+    $prompt = style_without_disabled_groups($prompt);
+    $prompt = preg_replace_callback($pattern, static function(array $match) use (&$states, &$active): string {
+        $key = style_lora_identity($match[1]);
+        if ((float)$match[2] > 0 || (isset($match[3]) && (float)$match[3] > 0)) {
+            $states[$key] = true;
+            $active[$key] = trim($match[1]);
+        }
+        return ' ';
+    }, $prompt) ?? $prompt;
+    foreach ($loras as $name) {
+        if (!is_string($name)) continue;
+        if (preg_match($pattern, $name, $match)) {
+            if ((float)$match[2] <= 0 && (!isset($match[3]) || (float)$match[3] <= 0)) continue;
+            $name = $match[1];
+        }
+        $key = style_lora_identity($name);
+        if ($key === '' || (array_key_exists($key, $states) && !$states[$key])) continue;
+        if (!isset($active[$key])) $active[$key] = $name;
+    }
+    $disabled = [];
+    foreach ($states as $key=>$enabled) if (!$enabled) $disabled[] = $names[$key];
+    return [$prompt, array_values($active), $disabled];
 }
 
 /** Prefer complete compound descriptors over nested words at the same location. */
@@ -184,7 +225,7 @@ function style_positive_matches(string $text, string $pattern, bool $ignoreProps
         $prefix = substr($text, max(0, $offset-160), min(160, $offset));
         // Deliberately bounded vocabulary: "not anime but a photo" keeps photo,
         // while "no anime or cartoon" and "not a photo" suppress the negated cues.
-        $negatedStyleWord = 'a|an|any|the|explicit|style|styles|tags|containing|references|to|of|look|like|rendered|as|and|or|source|ai|anime|animesque|japanimation|japanese|manga|manhwa|manhua|webtoon|hentai|fantasy|fantastical|cartoon|cartoons|cartoonish|cartoony|toon|photo|photographic|photorealistic|realistic|digital|comic|comics|book|art|artwork|illustration|illustrations|illustrated|drawing|drawings|drawn|hand|sketch|sketches|sketched|sketching|painting|paintings|painted|oil|acrylic|gouache|watercolor|watercolour|charcoal|graphite|ink|pencil|cgi|cg|3d|2d|3|2|d|computer|generated|animation|animated|film|movie|render|rendering|pixar|dreamworks|disney|ghibli|cel|cell|shaded|shading|line|lineart|outlines|flat|colors|colours|pixel|pixelated|sprites|vector|graphics|stylized|stylised|low|poly|polygon|voxel|claymation|clay|stop|motion|paper|papercut|origami|woodcut|linocut|lithograph|engraving|etching|halftone|screentone|cross|hatching|crosshatching|stippled|stippling|game|video|visual|novel|jrpg|chibi|super|deformed|anthro|anthropomorphic|anthromorphic|furry|character|waifu|vtuber|kemonomimi|nekomimi';
+        $negatedStyleWord = 'a|an|any|the|explicit|artificial|filter|filters|effect|effects|stylization|stylisation|style|styles|tags|containing|references|to|of|look|like|rendered|as|and|or|source|ai|anime|animesque|japanimation|japanese|manga|manhwa|manhua|webtoon|hentai|fantasy|fantastical|cartoon|cartoons|cartoonish|cartoony|toon|photo|photographic|photorealistic|realistic|digital|comic|comics|book|art|artwork|illustration|illustrations|illustrated|drawing|drawings|drawn|hand|sketch|sketches|sketched|sketching|painting|paintings|painted|oil|acrylic|gouache|watercolor|watercolour|charcoal|graphite|ink|pencil|cgi|cg|3d|2d|3|2|d|computer|generated|animation|animated|film|movie|render|rendering|pixar|dreamworks|disney|ghibli|cel|cell|shaded|shading|line|lineart|outlines|flat|colors|colours|pixel|pixelated|sprites|vector|graphics|stylized|stylised|low|poly|polygon|voxel|claymation|clay|stop|motion|paper|papercut|origami|woodcut|linocut|lithograph|engraving|etching|halftone|screentone|cross|hatching|crosshatching|stippled|stippling|game|video|visual|novel|jrpg|chibi|super|deformed|anthro|anthropomorphic|anthromorphic|furry|character|waifu|vtuber|kemonomimi|nekomimi';
         if (preg_match('~(?:\b(?:no|not|without|avoid|avoiding|exclude|excluding|remove|removing|omit|omitting)\b(?:[\s-]+(?:'.$negatedStyleWord.')){0,12}[\s-]+|\bnon[ -]*)$~u', $prefix)) continue;
         if (preg_match('~\b(?:non|no|not)[ -]+photo[ -]*$~u', $prefix)) continue;
         // Descriptions of an absent optical effect do not supply a positive
@@ -195,6 +236,15 @@ function style_positive_matches(string $text, string $pattern, bool $ignoreProps
         // medium or the existing explicit "realistic portrait" declaration.
         if (preg_match('~^realis(?:tic|m)\b~u', $term) && preg_match('~\bsemi[ -]*$~u', $prefix)) continue;
         $suffix = substr($text, $offset+strlen($term), 70);
+        if ($ignoreProps && preg_match('~^styl(?:iz|is)(?:ed|ation)$~u', $term)) {
+            // Commercial photography can be deliberately styled. The adjective
+            // is not a drawn-medium cue when that same sentence calls it a photo.
+            $before = preg_replace('~^.*[.!?;\n]~s', '', $prefix) ?? $prefix;
+            $after = preg_split('~[.!?;\n]~u', substr($text, $offset+strlen($term), 240), 2)[0];
+            $clause = $before.$term.$after;
+            if (style_positive_match($clause, 'photo(?:graph(?:ic|y)?)?|photorealistic') !== null &&
+                style_positive_match($clause, 'anime|manga|hentai|cartoon|illustrat(?:ion|ed)|drawing|painting|cgi|3[ -]?d[ -]render(?:ing)?|cel[ -]shad(?:ed|ing)') === null) continue;
+        }
         // A bare word can be a style tag, but natural-language actions and
         // objects (painted lips, drawn curtains, furry rugs) are not media.
         if (in_array($term, ['drawn','painted','furry'], true)) {
