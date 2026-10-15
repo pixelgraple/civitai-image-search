@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+const sourceControl = fs.readFileSync(new URL('../source-control.js', import.meta.url), 'utf8');
+const downloadStub = { create: () => ({ accept() {}, tick() {}, dispose() {} }) };
 const library = fs.readFileSync(new URL('../library.js', import.meta.url), 'utf8');
 const panel = fs.readFileSync(new URL('../panel.js', import.meta.url), 'utf8');
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve)); };
@@ -28,10 +30,10 @@ function transportHarness({ connectFails = false } = {}) {
     }
   };
 }
-const speedProfile = multiplier => ({ multiplier, metadataConcurrency: Math.round(12 * multiplier), uploadBatchSize: 60, uploadIntervalMs: 3000, sourceIntervalMs: Math.round(1000 / multiplier), outstandingLimit: 600 });
-const speedConfig = multiplier => ({ speedMultiplier: multiplier, collectionSpeed: speedProfile(multiplier) });
-const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.16', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
-function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.16', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+const speedProfile = multiplier => ({ multiplier, sourceConcurrency: 1, sourceStartLimit: 1, metadataConcurrency: Math.round(12 * multiplier), uploadBatchSize: 60, uploadIntervalMs: 3000, sourceIntervalMs: Math.round(1000 / multiplier), outstandingLimit: 600 });
+const speedConfig = multiplier => ({ sourceConcurrency: 1, speedMultiplier: multiplier, collectionSpeed: speedProfile(multiplier) });
+const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.17', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
+function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.17', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], requests = [], intervals = [], intervalDelays = [];
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -50,13 +52,13 @@ function libraryHarness({ config = {}, failSave = false, failFetch = false, scan
     else if (payload.type === 'getState') callback(scans);
     else callback({ ok: true, enabled: cloud.autoBrowse !== false, synced: 3, pending: 2, alreadyStored: 1, skippedPromptless: 4, ...browse });
   } } };
-  vm.runInNewContext(library, { document: { getElementById: get }, chrome, URL, Date: { now: transport.now }, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout, clearInterval() {}, setInterval(fn, delay) { intervals.push(fn); intervalDelays.push(delay); }, fetch: async (url, options) => {
+  vm.runInNewContext(sourceControl + '\n' + library, { ISSDownloadControl: downloadStub, document: { getElementById: get }, chrome, URL, Date: { now: transport.now }, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout, clearInterval() {}, setInterval(fn, delay) { intervals.push(fn); intervalDelays.push(delay); }, fetch: async (url, options) => {
     requests.push({ url, options }); if (failFetch) throw new Error('offline');
     return { ok: true, status: 200, json: async () => ({ ok: true, counts: { total: 5, ready: 4, pending: 1 } }) };
   } });
   return { get, cloud, messages, requests, intervals, intervalDelays, transport };
 }
-function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.16', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.17', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], events = {};
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -71,7 +73,7 @@ function panelHarness({ configured = true, config = {}, state = { status: {}, fe
     callback(payload.type === 'getConfig' ? { ...cloud, configured } : payload.type === 'getState' ? state : payload.type === 'civitai-auto-status' ? { ok: true, enabled: true, ...browse } : payload.type === 'getSourceStatus' ? {ok:true, ...source} : { ok: true });
   } } };
   const window = { __ISS_FEED_CAPTURE: { capture, cancel() {} } };
-  vm.runInNewContext(panel, { document: { getElementById() { return null; }, createElement() { return root; }, documentElement: { appendChild() {} }, addEventListener(name, fn) { events[name] = fn; }, removeEventListener() {} }, window, AbortController, chrome, Date: { now: transport.now }, location: { href: 'https://civitai.red/models/42', hostname: 'civitai.red' }, performance: { getEntriesByType() { return []; } }, setInterval() {}, clearInterval() {}, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout });
+  vm.runInNewContext(sourceControl + '\n' + panel, { ISSDownloadControl: downloadStub, document: { getElementById() { return null; }, createElement() { return root; }, documentElement: { appendChild() {} }, addEventListener(name, fn) { events[name] = fn; }, removeEventListener() {} }, window, AbortController, chrome, Date: { now: transport.now }, location: { href: 'https://civitai.red/models/42', hostname: 'civitai.red' }, performance: { getEntriesByType() { return []; } }, setInterval() {}, clearInterval() {}, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout });
   return { get, messages, root, events, transport, window, cloud };
 }
 test('fresh installation is ready without credentials and pins requests to shared HTTPS endpoint', async () => {
@@ -131,7 +133,7 @@ test('public UI has no connection form or credential fields', () => {
   assert.doesNotMatch(html, /contributorKey|connectionForm|type="password"|Disconnect/);
   assert.doesNotMatch(library, /writeToken|Authorization|writer-status|chrome\.storage/);
   assert.doesNotMatch(panel, /contributor key|Contributor connection|Connection &amp; browsing/);
-  assert.match(panel, /Browsing &amp; activity/); assert.match(html, /2\.8\.9/);
+  assert.match(panel, /Browsing &amp; activity/); assert.match(html, /2\.8\.17/);
 });
 
 test('panel starts only selected feed and offers resume for saved stopped progress', async () => {
@@ -219,10 +221,10 @@ test('panel displays a shared source cooldown',async()=>{
   assert.match(h.get('sourceStatus').textContent,/Civitai cooldown: \d+s/);
 });
 test('panel distinguishes actual source traffic from a catalog error and countdown', async () => {
-  const h = panelHarness({ source: { activeCount: 2, maxActive: 8, queued: 17 },
+  const h = panelHarness({ source: { activeCount: 2, maxActive: 4, queued: 17 },
     browse: { catalog: { lastError: 'Shared catalog returned HTTP 503 (check). Image storage is busy.', retryAt: Date.now() + 30000 } } });
   await flush(); const text = h.get('sourceStatus').textContent;
-  assert.match(text, /2 \/ 8 requests active.*17 waiting/); assert.match(text, /Server:.*503.*storage is busy.*Retry in \d+s/);
+  assert.match(text, /2 \/ 4 requests active.*17 waiting/); assert.match(text, /Server:.*503.*storage is busy.*Retry in \d+s/);
   assert.doesNotMatch(text, /Civitai cooldown/);
 });
 
@@ -295,7 +297,7 @@ test('settings push updates combined queues immediately without polling or serve
   h.transport.ports[0].emit(pushed({ state: { activeTabs: 2, status: { pending: 7, processed: 9, catalogSynced: 6 }, runs: [] }, browse: { pending: 4, pendingTotal: 4, synced: 8, processed: 12, phase: 'reading prompts' } }));
   assert.equal(h.get('pendingCount').textContent, '11'); assert.equal(h.get('syncedCount').textContent, '14');
   assert.match(h.get('queueBreakdown').textContent, /4 automatic · 7 feed/); assert.match(h.get('activityDetails').textContent, /21 processed · 14 accepted.*reading prompts/);
-  assert.match(h.get('connectionStatus').textContent, /Background 2\.8\.9 · Live/);
+  assert.match(h.get('connectionStatus').textContent, /Background 2\.8\.17 · Live/);
   assert.equal(h.messages.length, messages); assert.equal(h.requests.length, requests);
   await h.intervals[0](); assert.equal(h.messages.length, messages, 'A healthy port replaces polling');
 });
@@ -439,7 +441,7 @@ test('effective speed limits come from the background profile rather than multip
     const h = create({ config }); await flush();
     assert.equal(h.get('collectionSpeed').value, '2.5'); assert.equal(h.get('speedValue').textContent, '2.5×');
     assert.equal(h.get('collectionSpeed').attributes['aria-valuetext'], '2.5 times normal speed');
-    assert.match(h.get('speedEffective').textContent, /Prompt readers: 17 concurrent.*up to 8 Civitai starts per 0.65s, 8 active maximum.*600 shared queue limit.*60 records per batch, 3-second pause/);
+    assert.match(h.get('speedEffective').textContent, /Prompt readers: 17 concurrent.*up to 1 Civitai starts per 0.65s, 1 active maximum.*600 shared queue limit.*60 records per batch, 3-second pause/);
   }
 });
 

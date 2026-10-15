@@ -68,6 +68,7 @@ async function background(saved = {}) {
 test('speed profiles are bounded half steps with a fixed600 backlog and default1x', () => {
   const { speed } = queues();
   assert.equal(speed.get().multiplier, 1);
+  assert.equal(speed.get().sourceConcurrency, 1);
   for (let multiplier = 1; multiplier <= 5; multiplier += 0.5) {
     const profile = speed.profile(multiplier);
     assert.equal(profile.multiplier, multiplier);
@@ -78,7 +79,10 @@ test('speed profiles are bounded half steps with a fixed600 backlog and default1
     assert.equal(profile.uploadBatchSize, 60);
     assert.equal(profile.discoveryBatchSize, Math.min(100, Math.round(60 * multiplier)));
     assert.equal(profile.outstandingLimit, 600);
+    assert.equal(profile.sourceConcurrency, 1);
   }
+  for (const concurrency of [1, 2, 3, 4]) assert.equal(speed.profile(1, concurrency).sourceConcurrency, concurrency);
+  for (const concurrency of [0, 5, 1.5, '4', null, NaN]) assert.throws(() => speed.normalizeSourceConcurrency(concurrency));
   for (const value of [0, 0.5, 5.5, 99, -1, 1.25, NaN, Infinity, '2', null, undefined, {}, []])
     assert.throws(() => speed.normalize(value), `reject invalid speed ${String(value)}`);
 });
@@ -186,25 +190,32 @@ test('5x still caps all automatic tabs at600 unique durable records including pa
 
 test('live source speed changes shorten and lengthen rolling windows while retaining recent starts', async () => {
   const h = queues(['tab-feed-request.js']), queue = h.run('ISSCivitaiSourceQueue'), starts = [];
+  h.speed.set(1, 4);
   const request = owner => queue.enqueue(() => { starts.push({ owner, time: h.clock.now() }); return owner; }, () => true, owner);
-  await Promise.all(Array.from({ length: 8 }, () => request(7))); await flush();
-  const second = Promise.all(Array.from({ length: 8 }, () => request(8))); await flush(); await h.clock.advance(100);
-  h.speed.set(5); await h.clock.advance(299); assert.equal(starts.length, 8);
-  await h.clock.advance(1); assert.deepEqual(await second, Array(8).fill(8));
-  assert.equal(starts[8].time - starts[0].time, 400);
+  await Promise.all(Array.from({ length: 4 }, () => request(7))); await flush();
+  const second = Promise.all(Array.from({ length: 4 }, () => request(8))); await flush(); await h.clock.advance(100);
+  h.speed.set(5); await h.clock.advance(299); assert.equal(starts.length, 4);
+  await h.clock.advance(1); assert.deepEqual(await second, Array(4).fill(8));
+  assert.equal(starts[4].time - starts[0].time, 400);
   await h.clock.advance(500); queue.status();
   h.speed.set(1); const third = request(9); await flush();
   assert.equal(queue.status().nextStartInMs, 1500, 'a slowdown remembers starts outside the previous shorter window');
-  await h.clock.advance(1499); assert.equal(starts.length, 16);
-  await h.clock.advance(1); assert.equal(await third, 9); assert.equal(starts[16].time - starts[8].time, 2000);
+  await h.clock.advance(1499); assert.equal(starts.length, 8);
+  await h.clock.advance(1); assert.equal(await third, 9); assert.equal(starts[8].time - starts[4].time, 2000);
+  h.speed.set(1, 1);
+  const downshifted = request(10); await flush();
+  assert.equal(queue.status().maxActive, 1); assert.equal(queue.status().sourceStartLimit, 1);
+  assert.equal(queue.status().nextStartInMs, 2000, 'lowering the request limit accounts for the latest prior start');
+  await h.clock.advance(1999); assert.equal(starts.length, 9);
+  await h.clock.advance(1); assert.equal(await downshifted, 10);
 });
 
 test('max speed admits60 metadata source jobs fairly without local queue-overflow errors', async () => {
   const h = queues(['tab-feed-request.js']), queue = h.run('ISSCivitaiSourceQueue'), starts = [];
-  h.speed.set(5);
+  h.speed.set(5, 4);
   const jobs = Array.from({ length: 60 }, (_, index) => observe(queue.enqueue(() => { starts.push(index % 3); return index; }, () => true, index % 3)));
-  await flush(); assert.equal(starts.length, 8); assert.equal(queue.status().queued, 52);
-  for (let index = 0; index < 7; index++) await h.clock.advance(400);
+  await flush(); assert.equal(starts.length, 4); assert.equal(queue.status().queued, 56);
+  for (let index = 0; index < 14; index++) await h.clock.advance(400);
   assert.ok((await Promise.all(jobs)).every(result => result.ok));
   assert.deepEqual(starts.slice(0, 9), [0, 1, 2, 0, 1, 2, 0, 1, 2]);
   assert.equal(queue.status().queued, 0);
@@ -214,7 +225,7 @@ test('downshifting60 active images preserves room for their second metadata requ
   const h = queues(['civitai-image-queue.js', 'tab-feed-request.js']);
   const images = h.context.ISSImageQueue, requests = h.run('ISSCivitaiSourceQueue');
   let completedRequests = 0;
-  h.speed.set(5);
+  h.speed.set(5, 4);
   const jobs = Array.from({ length: 60 }, (_, index) => observe(images.run(async () => {
     for (let field = 0; field < 2; field++)
       await requests.enqueue(() => { completedRequests++; }, () => true, index % 3);

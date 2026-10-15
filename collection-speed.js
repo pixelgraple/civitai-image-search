@@ -7,9 +7,14 @@ globalThis.ISSCollectionSpeed = (() => {
       throw new TypeError('Collection speed must be a number from 1 to 5 in steps of 0.5.');
     return value;
   }
-  function profile(value = 1) {
+  function normalizeSourceConcurrency(value) {
+    if (!Number.isInteger(value) || value < 1 || value > 4)
+      throw new TypeError('Civitai processing must be a whole number from 1 to 4.');
+    return value;
+  }
+  function profile(value = 1, sourceConcurrency = 1) {
     const multiplier = normalize(value);
-    return Object.freeze({ multiplier, sourceIntervalMs: Math.round(2000 / multiplier),
+    return Object.freeze({ multiplier, sourceConcurrency: normalizeSourceConcurrency(sourceConcurrency), sourceIntervalMs: Math.round(2000 / multiplier),
       uploadIntervalMs: 3000, imageCooldownMs: Math.round(1000 / multiplier),
       metadataConcurrency: 12 * multiplier, discoveryBatchSize: Math.min(100, Math.round(60 * multiplier)),
       uploadBatchSize: 60, scrollIntervalMs: Math.round(2000 / multiplier),
@@ -17,8 +22,8 @@ globalThis.ISSCollectionSpeed = (() => {
   }
   let current = profile();
   const listeners = new Set();
-  return Object.freeze({ normalize, profile, get: () => current,
-    set(value) { const previous = current; current = profile(value);
+  return Object.freeze({ normalize, normalizeSourceConcurrency, profile, get: () => current,
+    set(value, sourceConcurrency = current.sourceConcurrency) { const previous = current; current = profile(value, sourceConcurrency);
       for (const listener of [...listeners]) { try { listener(current, previous); } catch {} }
       return current;
     },

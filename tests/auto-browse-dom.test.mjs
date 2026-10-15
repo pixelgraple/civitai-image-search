@@ -127,7 +127,7 @@ test('same-version injection is idempotent and a previous observer is disposed o
   h.context.window.__ISS_BROWSE_OBSERVER.dispose(); await h.pulse(); assert.equal(h.messages.length, 1); assert.equal(h.listeners.size, 0); assert.equal(h.timers.size, 0);
 });
 test('legacy boolean guard no longer prevents updated observer installation', async () => {
-  const h = harness(); h.context.window.__ISS_BROWSE_OBSERVER = true; await h.start(); assert.equal(h.context.window.__ISS_BROWSE_OBSERVER.version, '2.8.16');
+  const h = harness(); h.context.window.__ISS_BROWSE_OBSERVER = true; await h.start(); assert.equal(h.context.window.__ISS_BROWSE_OBSERVER.version, '2.8.17');
   const rejected = harness('https://civitai.red.evil.example/'); await rejected.start(); assert.equal(rejected.statusCalls(), 0);
 });
 test('navigation during card submission never scrolls the new page using stale work', async () => {

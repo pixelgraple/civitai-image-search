@@ -1,8 +1,8 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.16', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.17', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
-  let saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
+  let settingsOpen = false, saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
   let latest = null, revision = 0, statusPort = null, portReady = false, reconnectTimer = null, handshakeTimer = null, reconnectAttempts = 0, disposed = false;
   const count = value => Math.max(0, Number(value) || 0).toLocaleString();
   const amount = value => Math.max(0, Number(value) || 0);
@@ -26,7 +26,7 @@
       $('speedReset').disabled = !supported;
       $('speedStatus').textContent = error || (pending || requested !== null ? `Applying ${label(target)} across all tabs…` : !supported ? 'Checking collection speed…' : changed ? `Applied ${label(applied)} across all tabs.` : `${label(applied)} active across all tabs. Changes apply automatically.`);
       $('speedStatus').classList.toggle('error', Boolean(error));
-      $('speedEffective').textContent = profile ? `Prompt readers: ${profile.metadataConcurrency} concurrent · up to 8 Civitai starts per ${(profile.sourceIntervalMs / 1000).toLocaleString()}s, 8 active maximum · ${profile.outstandingLimit} shared queue limit. Record uploads: up to ${profile.uploadBatchSize} records per batch, ${(profile.uploadIntervalMs / 1000).toLocaleString()}-second pause. Smaller batches are sent when fewer records are ready.` : 'Reading effective collection limits…';
+      $('speedEffective').textContent = profile ? `Prompt readers: ${profile.metadataConcurrency} concurrent · up to ${profile.sourceStartLimit || profile.sourceConcurrency || 1} Civitai starts per ${(profile.sourceIntervalMs / 1000).toLocaleString()}s, ${profile.sourceConcurrency || 1} active maximum · ${profile.outstandingLimit} shared queue limit. Record uploads: up to ${profile.uploadBatchSize} records per batch, ${(profile.uploadIntervalMs / 1000).toLocaleString()}-second pause. Smaller batches are sent when fewer records are ready.` : 'Reading effective collection limits…';
     }
     async function apply() {
       if (disposed || pending || requested === null) return;
@@ -69,6 +69,11 @@
     };
   }
   const speedControl = createSpeedControl(() => { revision++; });
+  const sourceControl = ISSSourceControl.create({ root: document, send, onApplied(result) { revision++; speedControl.accept(result.config, result.collectionSpeed, true); } });
+  function showSettings(open) { settingsOpen = open; $('settingsView').hidden = !open; $('settingsToggle').setAttribute('aria-expanded', String(open)); (open ? $('settingsClose') : $('settingsToggle')).focus?.(); }
+  $('settingsToggle').addEventListener('click', () => showSettings(!settingsOpen));
+  $('settingsClose').addEventListener('click', () => showSettings(false));
+  document.addEventListener?.('keydown', event => { if (event.key === 'Escape' && settingsOpen) { showSettings(false); event.preventDefault?.(); } });
   const downloadControl = ISSDownloadControl.create({ root: document, send, chooseTab: true });
   async function request(action) {
     const headers = { Accept: 'application/json' };
@@ -103,7 +108,7 @@
       const sourceActive = Number(source?.activeCount ?? (source?.active ? 1 : 0)), sourceQueued = Number(source?.queued || 0);
       const catalogWait = Math.max(0, Math.ceil((Number(status?.catalog?.retryAt || 0) - Date.now()) / 1000));
       const sourceWait = Math.max(0, Math.ceil((Number(source?.blockedUntil || 0) - Date.now()) / 1000));
-      $('sourceStatus').textContent = `Civitai: ${sourceActive} / ${Number(source?.maxActive || 8)} requests active · ${sourceQueued} waiting for a source turn.` +
+      $('sourceStatus').textContent = `Civitai: ${sourceActive} / ${Number(source?.maxActive || 1)} requests active · ${sourceQueued} waiting for a source turn.` +
         ` ${count(source?.completedLastMinute)} successful requests in the last minute · peak ${count(source?.peakActiveCount)} active this session.` +
         (sourceWait ? ` Civitai cooldown: ${sourceWait}s.` : source?.pauseReason ? ` ${source.pauseReason}` : '') +
         (status?.catalog?.lastError ? ` Server: ${status.catalog.lastError}${catalogWait ? ` Retry in ${catalogWait}s.` : ' Retrying when queued work is ready.'}` :
@@ -121,6 +126,7 @@
   }
   function applySnapshot(snapshot) {
     latest = snapshot; revision++;
+    sourceControl.accept(snapshot.config, snapshot.state?.pipeline?.collectionSpeed || snapshot.browse?.collectionSpeed, snapshot.backgroundVersion === VERSION && snapshot.statusProtocol === 1);
     speedControl.accept(snapshot.config, snapshot.state?.pipeline?.collectionSpeed || snapshot.browse?.collectionSpeed, snapshot.backgroundVersion === VERSION && snapshot.statusProtocol === 1);
     downloadControl.accept(snapshot.transfers, snapshot.backgroundVersion === VERSION && snapshot.statusProtocol === 1);
     renderSnapshot(snapshot);
@@ -201,13 +207,13 @@
       if (!result?.ok) throw new Error(result?.error || 'Could not stop collection.');
       $('autoBrowse').checked = false;
       preferenceDirty = false; renderedPreference = false;
-      await refreshStatus(); message('All collection stopped. Saved scan positions are retained.');
-    } catch (error) { message(error.message, true); }
+      await refreshStatus(); $('collectionMessage').textContent = 'All collection stopped. Saved scan positions are retained.'; $('collectionMessage').classList.toggle('error', false);
+    } catch (error) { $('collectionMessage').textContent = error.message; $('collectionMessage').classList.toggle('error', true); }
     finally { $('pauseAll').disabled = false; }
   });
   $('autoBrowse').addEventListener('change', () => { preferenceDirty = true; });
   connectStatus(); refreshStatus(); checkHealth();
   const pollTimer = setInterval(() => { if (!portReady) refreshStatus(); else if (latest) renderSnapshot(latest); downloadControl.tick(); }, 2000);
   const healthTimer = setInterval(checkHealth, 10000);
-  globalThis.addEventListener?.('pagehide', () => { disposed = true; speedControl.dispose(); downloadControl.dispose(); clearInterval(pollTimer); clearInterval(healthTimer); clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); disconnectStatus(statusPort, true); });
+  globalThis.addEventListener?.('pagehide', () => { disposed = true; speedControl.dispose(); sourceControl.dispose(); downloadControl.dispose(); clearInterval(pollTimer); clearInterval(healthTimer); clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); disconnectStatus(statusPort, true); });
 })();

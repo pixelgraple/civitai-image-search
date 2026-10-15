@@ -5,7 +5,7 @@ importScripts('state-checkpoint.js', 'collection-speed.js', 'download-settings.j
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.16', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.17', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -293,10 +293,11 @@ function formatDebugLog() {
 }
 async function readCloudCatalogConfig() {
   const value = await readStorage(CONFIG_KEY) || {};
-  let speedMultiplier = 1;
+  let speedMultiplier = 1, sourceConcurrency = 1;
   try { speedMultiplier = ISSCollectionSpeed.normalize(value.speedMultiplier ?? 1); } catch {}
+  try { sourceConcurrency = ISSCollectionSpeed.normalizeSourceConcurrency(value.sourceConcurrency ?? 1); } catch {}
   return { apiBase: API_URL, autoBrowse: value.autoBrowse !== false, configured: true,
-    speedMultiplier, collectionSpeed: ISSCollectionSpeed.profile(speedMultiplier) };
+    speedMultiplier, sourceConcurrency, collectionSpeed: ISSCollectionSpeed.profile(speedMultiplier, sourceConcurrency) };
 }
 function validFeed(feed, pageUrl) {
   return ISSBrowseCollector.page(pageUrl) && feed?.site === 'civitai' && feed.pageUrl === pageUrl &&
@@ -305,9 +306,11 @@ function validFeed(feed, pageUrl) {
 }
 async function restoreAll() {
   const previousConfig = await readStorage(CONFIG_KEY);
-  uploadIntervalMs = ISSCollectionSpeed.set((await readCloudCatalogConfig()).speedMultiplier).uploadIntervalMs;
+  const restoredConfig = await readCloudCatalogConfig();
+  uploadIntervalMs = ISSCollectionSpeed.set(restoredConfig.speedMultiplier, restoredConfig.sourceConcurrency).uploadIntervalMs;
   if (previousConfig && (Object.hasOwn(previousConfig, 'writeToken') || previousConfig.apiBase !== API_URL)) {
-    await writeStorage(CONFIG_KEY, { apiBase: API_URL, autoBrowse: previousConfig.autoBrowse !== false, speedMultiplier: ISSCollectionSpeed.get().multiplier });
+    await writeStorage(CONFIG_KEY, { apiBase: API_URL, autoBrowse: previousConfig.autoBrowse !== false,
+      speedMultiplier: ISSCollectionSpeed.get().multiplier, sourceConcurrency: ISSCollectionSpeed.get().sourceConcurrency });
   }
   const saved = await readStorage(STATE_KEY);
   if (!saved || typeof saved !== 'object') return;
@@ -877,7 +880,7 @@ function notifyStatusChanged() {
 globalThis.indexCivitaiStatusChanged = notifyStatusChanged;
 function publicStatusConfig(config) {
   return versionStatus({ ok: true, apiBase: API_URL, configured: true, autoBrowse: config.autoBrowse,
-    speedMultiplier: config.speedMultiplier, collectionSpeed: config.collectionSpeed });
+    speedMultiplier: config.speedMultiplier, sourceConcurrency: config.sourceConcurrency, collectionSpeed: config.collectionSpeed });
 }
 function compactStatusState(state) {
   const compactRun = run => ({ ...run, ...(run.feed ? { feed: { pages: run.feed.pages, done: run.feed.done } } : {}) });
@@ -994,13 +997,14 @@ function openLibrary() {
 function updateConfig(change) {
   const result = configWrites.catch(() => {}).then(async () => {
     const previous = await readCloudCatalogConfig();
-    const next = { apiBase: API_URL, autoBrowse: previous.autoBrowse, speedMultiplier: previous.speedMultiplier, ...change };
+    const next = { apiBase: API_URL, autoBrowse: previous.autoBrowse, speedMultiplier: previous.speedMultiplier,
+      sourceConcurrency: previous.sourceConcurrency, ...change };
     await writeStorage(CONFIG_KEY, next); return next;
   });
   configWrites = result; return result;
 }
-function applyCollectionSpeed(value) {
-  const profile = ISSCollectionSpeed.set(value); uploadIntervalMs = profile.uploadIntervalMs;
+function applyCollectionSpeed(value, sourceConcurrency = ISSCollectionSpeed.get().sourceConcurrency) {
+  const profile = ISSCollectionSpeed.set(value, sourceConcurrency); uploadIntervalMs = profile.uploadIntervalMs;
   nextUploadAt = Math.max(uploadCooldownUntil, lastUploadFinishedAt ? lastUploadFinishedAt + uploadIntervalMs : 0);
   for (const wake of [...uploadWaiters]) wake();
   if (uploadFlushTimer !== null) { clearTimeout(uploadFlushTimer); uploadFlushTimer = null; }
@@ -1052,8 +1056,31 @@ async function handleMessage(message, sender) {
         if (!ISSBrowseCollector.page(tab?.url)) throw new Error('Change collection speed from a current Civitai tab.');
       }
       await updateConfig({ speedMultiplier });
-      const collectionSpeed = applyCollectionSpeed(speedMultiplier);
-      return versionStatus({ ok: true, config: publicStatusConfig(await readCloudCatalogConfig()), collectionSpeed });
+      const config = await readCloudCatalogConfig();
+      const collectionSpeed = applyCollectionSpeed(config.speedMultiplier, config.sourceConcurrency);
+      return versionStatus({ ok: true, config: publicStatusConfig(config), collectionSpeed });
+    }
+    case 'setSourceConcurrency': {
+      const sourceConcurrency = ISSCollectionSpeed.normalizeSourceConcurrency(message.sourceConcurrency);
+      if (isCivitaiSender(sender)) {
+        const tabId = controlTabId(message, sender), tab = await getTab(tabId);
+        if (!ISSBrowseCollector.page(tab?.url)) throw new Error('Change Civitai processing from a current Civitai tab.');
+      }
+      await updateConfig({ sourceConcurrency });
+      const config = await readCloudCatalogConfig();
+      const collectionSpeed = applyCollectionSpeed(config.speedMultiplier, config.sourceConcurrency);
+      return versionStatus({ ok: true, config: publicStatusConfig(config), collectionSpeed });
+    }
+    case 'setAutoBrowse': {
+      if (typeof message.autoBrowse !== 'boolean') throw new Error('Automatic browsing must be on or off.');
+      if (isCivitaiSender(sender)) {
+        const tabId = controlTabId(message, sender), tab = await getTab(tabId);
+        if (!ISSBrowseCollector.page(tab?.url)) throw new Error('Change automatic browsing from a current Civitai tab.');
+      }
+      const previous = await readCloudCatalogConfig();
+      const next = await updateConfig({ autoBrowse: message.autoBrowse });
+      if (previous.autoBrowse !== next.autoBrowse) { await autoBrowseCollector.reconfigure(); await refreshAutoBrowseTabs(); }
+      return versionStatus({ ok: true, config: publicStatusConfig(await readCloudCatalogConfig()) });
     }
     case 'saveConfig': {
       if (!isExtensionPage(sender)) throw new Error('Change browsing settings in the Index Civitai extension page.');
@@ -1089,7 +1116,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.runtime.onConnect.addListener(connectStatusPort);
 chrome.action.onClicked.addListener(async tab => {
   if (!ISSBrowseCollector.page(tab?.url)) { await openLibrary(); return; }
-  try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-feed-capture.js', 'download-control.js', 'panel.js'] }); }
+  try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-feed-capture.js', 'download-control.js', 'source-control.js', 'panel.js'] }); }
   catch (error) { addDebug('panel-error', error.message); }
 });
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -1121,8 +1148,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes[CONFIG_KEY]) return;
   const changed = changes[CONFIG_KEY];
   ready.then(async () => {
-    if (changed.oldValue?.speedMultiplier !== changed.newValue?.speedMultiplier)
-      applyCollectionSpeed((await readCloudCatalogConfig()).speedMultiplier);
+    if (changed.oldValue?.speedMultiplier !== changed.newValue?.speedMultiplier ||
+        changed.oldValue?.sourceConcurrency !== changed.newValue?.sourceConcurrency) {
+      const config = await readCloudCatalogConfig();
+      applyCollectionSpeed(config.speedMultiplier, config.sourceConcurrency);
+    }
     if ((changed.oldValue?.autoBrowse !== false) !== (changed.newValue?.autoBrowse !== false)) {
       await autoBrowseCollector.reconfigure(); await refreshAutoBrowseTabs();
     }

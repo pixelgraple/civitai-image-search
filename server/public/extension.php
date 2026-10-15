@@ -11,16 +11,16 @@ header('X-Frame-Options: DENY');
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Index Civitai turns the galleries you browse into a shared searchable library of images and prompts. Install the free community extension.">
   <title>Index Civitai · Install the community indexing extension</title>
-  <link rel="stylesheet" href="extension.css?v=2.8.16">
+  <link rel="stylesheet" href="extension.css?v=2.8.17">
 </head>
 <body>
   <header class="site-header"><a class="brand" href="/">SEARCH<span>CIVITAI</span><small>XYZ</small></a><nav aria-label="Site navigation"><a href="/">Image library</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav></header>
   <main>
     <section class="intro">
-      <p class="eyebrow">COMMUNITY EXTENSION · VERSION 2.8.16</p>
+      <p class="eyebrow">COMMUNITY EXTENSION · VERSION 2.8.17</p>
       <h1>Browse Civitai.<br>Build a library everyone can search.</h1>
       <p class="lead">Index Civitai collects image links, prompts and generation details from your chosen galleries. The server saves image copies, and the community can search everything indexed so far.</p>
-      <div class="actions"><a class="button primary" href="/downloads/index-civitai-2.8.16.zip" download>Download Index Civitai 2.8.16</a><a class="button" href="#install">Installation guide ↓</a></div>
+      <div class="actions"><a class="button primary" href="/downloads/index-civitai-2.8.17.zip" download>Download Index Civitai 2.8.17</a><a class="button" href="#install">Installation guide ↓</a></div>
       <p class="caption">For desktop Chromium browsers, including Chrome and Brave. No account or contributor key required.</p>
     </section>
     <section aria-labelledby="features"><div class="section-title"><p class="eyebrow">WHAT IT DOES</p><h2 id="features">Your browsing helps grow the shared index.</h2></div>
@@ -36,12 +36,12 @@ header('X-Frame-Options: DENY');
     <section id="install" class="install" aria-labelledby="install-title">
       <div><p class="eyebrow">GET STARTED</p><h2 id="install-title">Install once.<br>Choose what to index.</h2><p>This is an unpacked browser extension. Keep its extracted folder in a permanent location.</p></div>
       <ol>
-        <li><strong>Download and extract the ZIP.</strong><span>Use the download above, or the matching v2.8.16 asset on GitHub Releases.</span></li>
+        <li><strong>Download and extract the ZIP.</strong><span>Use the download above, or the matching v2.8.17 asset on GitHub Releases.</span></li>
         <li><strong>Open your browser’s Extensions page.</strong><span>Visit <code>chrome://extensions</code> or <code>brave://extensions</code> and enable <strong>Developer mode</strong>.</span></li>
         <li><strong>Choose Load unpacked.</strong><span>Select the extracted folder containing <code>manifest.json</code>.</span></li>
         <li><strong>Open a Civitai gallery.</strong><span>Works on civitai.com and civitai.red. Open the Index Civitai panel and choose <strong>Scan this tab</strong>, or leave browsing collection enabled.</span></li>
       </ol>
-      <p class="update"><strong>Already installed?</strong> Replace the files in your extension folder, click <strong>Reload</strong> on the Extensions page, and refresh your Civitai gallery tabs. Save unfinished upload or edit forms before refreshing them. Version 2.8.16 lets queued Civitai requests fill up to eight active slots across all tabs, shows successful requests per minute, and combines repeated queue saves to reduce browser CPU, memory and local storage activity during long scans. Your queued prompts and progress are retained. Reload the extension to activate the fix. The server can also repair missing metadata from previously indexed image pages; that job runs independently of your browser.</p>
+      <p class="update"><strong>Already installed?</strong> Replace the files in your extension folder, click <strong>Reload</strong> on the Extensions page, and refresh your Civitai gallery tabs. Save unfinished upload or edit forms before refreshing them. Version 2.8.17 starts Civitai processing at one request across all tabs, with a live slider from one to four in the new cogwheel Settings panel. Automatic browsing, speed and server transfer preferences are grouped in Settings, while activity stays visible. Server image transfers retain their separate limits, and existing Civitai cooldowns are respected. Your queued prompts and progress are retained. Reload the extension to activate the fix. The server can also repair missing metadata from previously indexed image pages; that job runs independently of your browser.</p>
     </section>
     <section class="details" aria-labelledby="details-title"><p class="eyebrow">HOW COLLECTION WORKS</p><h2 id="details-title">A few useful details</h2>
       <details><summary>Does it run without me scrolling?</summary><p>Yes, supported galleries scroll automatically while the browser and tabs remain open. Background tabs can collect without focus. Collection pauses when the queue is full, and sleeping computers or suspended tabs cannot continue normal work.</p></details>
@@ -53,6 +53,6 @@ header('X-Frame-Options: DENY');
     </section>
     <section class="closing"><div><h2>Help make prompts easier to find.</h2><p>Index the galleries you choose, then search the growing community library.</p></div><a class="button primary" href="/">Explore the library ↗</a></section>
   </main>
-  <footer><span>Independent community project.</span><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">Source and documentation on GitHub ↗</a><a href="/downloads/index-civitai-2.8.16.zip" download>Download 2.8.16</a></footer>
+  <footer><span>Independent community project.</span><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">Source and documentation on GitHub ↗</a><a href="/downloads/index-civitai-2.8.17.zip" download>Download 2.8.17</a></footer>
 </body>
 </html>

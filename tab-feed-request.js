@@ -71,18 +71,23 @@ const ISSCivitaiSourceQueue = (() => {
   const lastServed = new Map();
   let turn = 0;
   const notify = () => { try { globalThis.indexCivitaiStatusChanged?.(); } catch {} };
-  const MAX_ACTIVE = 8;
-  const SOURCE_START_LIMIT = 8;
-  // Retain the last eight starts even when a faster profile has aged them out.
-  // A live slowdown must still account for those starts in its longer window.
+  const MAX_ACTIVE = 4;
+  // Retain the last four starts even when a faster profile has aged them out.
+  // A live slowdown or lower request limit must still account for those starts.
   const recentStarts = [], successfulCompletions = [];
   let initialized, saving = Promise.resolve(), active = 0, timer = null;
   let peakActiveCount = 0, cooldownUntil = 0, authStatus = 0, reason = '';
-  const speed = () => globalThis.ISSCollectionSpeed?.get() || { sourceIntervalMs: 2000, metadataConcurrency: 12 };
+  const speed = () => globalThis.ISSCollectionSpeed?.get() || { sourceIntervalMs: 2000, metadataConcurrency: 12, sourceConcurrency: 1 };
+  const sourceLimit = () => {
+    const value = speed().sourceConcurrency;
+    return Number.isInteger(value) && value >= 1 && value <= MAX_ACTIVE ? value : 1;
+  };
   function startDelay(now = Date.now()) {
-    const interval = speed().sourceIntervalMs;
+    const interval = speed().sourceIntervalMs, limit = sourceLimit();
     const inWindow = recentStarts.filter(startedAt => startedAt > now - interval);
-    return inWindow.length >= SOURCE_START_LIMIT ? Math.max(0, inWindow[0] + interval - now) : 0;
+    // When reducing the limit, wait until fewer than that many prior starts
+    // remain in the window, rather than only waiting for the oldest to expire.
+    return inWindow.length >= limit ? Math.max(0, inWindow[inWindow.length - limit] + interval - now) : 0;
   }
   function trimCompletions(now = Date.now()) {
     while (successfulCompletions.length && successfulCompletions[0] <= now - 60000) successfulCompletions.shift();
@@ -145,7 +150,7 @@ const ISSCivitaiSourceQueue = (() => {
     await persist();
   }
   function pump() {
-    if (active >= MAX_ACTIVE || timer !== null || !pending.length) return;
+    if (active >= sourceLimit() || timer !== null || !pending.length) return;
     const stopped = blocked();
     if (stopped) { drain(stopped); return; }
     const delay = startDelay();
@@ -155,7 +160,7 @@ const ISSCivitaiSourceQueue = (() => {
     }
     // Keep each tab's requests ordered, but give another waiting tab its turn.
     // A page with twelve metadata reads must not hide a new tab's first feed
-    // request behind its entire batch. Eight starts share one rolling window.
+    // request behind its entire batch. The selected limit shares one rolling window.
     const owners = new Set(pending.map(entry => entry.owner));
     for (const owner of lastServed.keys()) if (!owners.has(owner)) lastServed.delete(owner);
     let index = 0;
@@ -165,7 +170,7 @@ const ISSCivitaiSourceQueue = (() => {
     const [entry] = pending.splice(index, 1); active++;
     peakActiveCount = Math.max(peakActiveCount, active);
     recentStarts.push(Date.now());
-    if (recentStarts.length > SOURCE_START_LIMIT) recentStarts.shift();
+    if (recentStarts.length > MAX_ACTIVE) recentStarts.shift();
     lastServed.set(entry.owner, ++turn); notify();
     Promise.resolve().then(async () => {
       if (!await entry.isCurrent()) throw Object.assign(new Error('This tab stopped collecting before its source request ran.'), { status: 409, sourceCancelled: true });
@@ -197,9 +202,9 @@ const ISSCivitaiSourceQueue = (() => {
       authStatus = 0; reason = ''; await persist(); notify();
       return this.status();
     },
-    status() { trimCompletions(); return { active: active > 0, activeCount: active, maxActive: MAX_ACTIVE,
-      sourceStartLimit: SOURCE_START_LIMIT, queued: pending.length, intervalMs: speed().sourceIntervalMs,
-      nextStartInMs: pending.length && active < MAX_ACTIVE && !blocked() ? startDelay() : 0,
+    status() { trimCompletions(); const limit = sourceLimit(); return { active: active > 0, activeCount: active, maxActive: limit,
+      maxActiveLimit: MAX_ACTIVE, sourceStartLimit: limit, queued: pending.length, intervalMs: speed().sourceIntervalMs,
+      nextStartInMs: pending.length && active < limit && !blocked() ? startDelay() : 0,
       completedLastMinute: successfulCompletions.length, peakActiveCount, pendingLimit: pendingLimit(), authStatus,
       blockedUntil: cooldownUntil, retryAfterMs: Math.max(0, cooldownUntil - Date.now()),
       pauseReason: authStatus ? `Civitai returned HTTP ${authStatus}. Check the site, then start or resume a scan.`

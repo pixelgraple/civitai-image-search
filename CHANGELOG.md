@@ -2,6 +2,14 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.17
+
+- Default to one active Civitai request across all tabs, with a live processing slider from one to four.
+- Apply the selected limit to both simultaneous requests and starts per rolling interval; retain recent starts when lowering the limit and let in-flight work finish.
+- Remember the chosen setting across browser restarts without clearing queued prompts, source rate-limit cooldowns or authentication pauses.
+- Add cogwheel Settings panels and a cleaner activity layout. Group processing, automatic browsing, collection speed and server transfer preferences together.
+- Keep the server's separate image-transfer limits unchanged.
+
 ## 2.8.16
 
 - Let waiting source requests fill up to eight active slots together. Replace the one-start-at-a-time delay with at most eight starts per rolling collection-speed window.
