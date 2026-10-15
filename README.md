@@ -4,7 +4,7 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.10](https://search-civitai.xyz/downloads/index-civitai-2.8.10.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.10)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.11](https://search-civitai.xyz/downloads/index-civitai-2.8.11.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.11)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Public browsing and contribution require no account or contributor key.
 
@@ -21,6 +21,7 @@ The extension supports `civitai.com` and `civitai.red`. The website can be used 
 | Duplicate prevention | Check known image IDs before reading prompts; verify stored copies with SHA256 and reuse identical content after its first necessary download. |
 | Live progress | Watch discovered images, duplicate checks, prompt reads, ready/sending records, accepted submissions and skipped images as they change. |
 | Adjustable collection | Change collection speed from 1× to 5× in half steps while scans are running. |
+| Per-tab image transfers | Set each tab's server image-transfer target from 4 to 32 while it runs, and see its active, pending and stored counts. Tabs share 32 server transfer slots. |
 | Source reactions | Preserve available Civitai reaction counts and update them when later observations become available. |
 | Community reactions | Upvote, love, laugh or react with wow on the shared website. These votes are separate from Civitai's counts. |
 | Style grouping | Sort into Anime or Realistic from positive prompts, tags, model and LoRA names using a documented metadata rule. |
@@ -29,7 +30,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.10.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.11.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.
@@ -44,6 +45,8 @@ This is an unpacked Chromium extension. The download contains the browser extens
 3. Leave that tab open. Discovery continues automatically; manual scrolling is not required.
 4. Open another gallery in another tab to collect a different feed. Each tab has its own controls and saved position.
 5. Use **Browsing & activity** to change collection speed and see combined progress. **Open shared library** takes you to the searchable results.
+
+The separate **Server image transfers** slider controls actual image downloads for that tab, from **4 to 32** (default **32**). Use it in the tab's panel or select a tab in Browsing & activity. The server shares **32 total transfer slots** among contributors, so a target of 32 is a ceiling rather than a reserved allocation. Lowering the limit lets in-flight downloads finish before admitting more. Browser metadata uploads retain their 60-record batch and three-second pause.
 
 **Collect as I browse Civitai** defaults to on. It collects cards and automatically scrolls supported galleries, while detail pages can be indexed without scrolling. Creation, edit, upload, settings and generation forms are excluded. An explicit feed scan follows the selected page's captured feed filters and keeps paging until stopped or the feed ends.
 
@@ -73,7 +76,7 @@ Your selected Civitai tabs
   → shared prompt search, gallery and reactions
 ```
 
-The extension connects to the fixed `https://search-civitai.xyz/api.php` endpoint. It contains no SSH credentials, contributor keys or server configuration, and has no browser downloads permission. It stores preferences, queue metadata and progress in the browser profile. Image files are saved by the server worker. The website's **Download original** button is a separate, deliberate user action.
+The extension connects to the fixed `https://search-civitai.xyz/api.php` endpoint. It contains no SSH credentials, contributor keys or server configuration, and has no browser downloads permission. It stores preferences, queue metadata and progress in the browser profile. Each tab automatically gets a random private collection identity to update its own transfer preference; users do not create or enter a key. The server retains only a hash of that identity and does not expose it in public image records. Image files are saved by the server worker. The website's **Download original** button is a separate, deliberate user action.
 
 The server validates IDs and approved Civitai HTTPS source hosts, verifies file content and hashes, and controls its own storage paths. The submission API does not provide shell access, arbitrary file upload, deletion or filesystem browsing.
 
@@ -86,7 +89,7 @@ The server validates IDs and approved Civitai HTTPS source hosts, verifies file 
 | Source requests | At most **two actual Civitai requests active globally**. Starts are paced from two seconds at 1× to 400 ms at 5×. |
 | Metadata processing | Rolling slots: completed prompts can move forward without waiting for the slowest image or optional reaction lookup. |
 | Metadata submission | Up to **60 prompt records per batch**, with a **three-second pause** after a batch. Smaller batches are sent when fewer records are ready. This stays the same at every speed setting. |
-| Server image downloads | **Four concurrent transfers by default**, streamed to temporary files; thumbnails are generated individually. |
+| Server image downloads | **Up to 32 concurrent transfers total**, with a live **4–32 target for each tab**. Vacant slots are refilled without waiting for a whole batch. Downloads stream to temporary files; thumbnails are generated individually. |
 | Shared totals | The activity page refreshes indexed, stored and pending server totals every ten seconds. Local queue progress receives live updates. |
 
 More tabs share the same source request budget. Up to three feeds run together; additional started tabs take turns. Paused tabs retain their outstanding work, so resuming them may be necessary to drain a full queue.

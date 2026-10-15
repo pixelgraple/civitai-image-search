@@ -19,6 +19,27 @@ try {
     if ($action === 'writer-status' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         authenticate_writer(); json_response(['ok'=>true,'writer'=>true,'publicIndexing'=>public_ingest_enabled()]);
     }
+    if ($action === 'download-settings' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        authenticate_writer(); $body=json_input(); $token=$body['collectionToken']??null;
+        if (!valid_collection_token($token) || (isset($body['concurrency']) && (!is_int($body['concurrency']) || $body['concurrency']<4 || $body['concurrency']>32))) {
+            json_response(['ok'=>false,'error'=>'Use a valid collection identity and a transfer limit from 4 to 32.'],400);
+        }
+        $key=hash('sha256',$token); $pdo=db(); $pdo->beginTransaction();
+        try {
+            ensure_download_lane($pdo,$key);
+            if (isset($body['concurrency'])) $pdo->prepare('UPDATE download_lanes SET concurrency=?,updated_at=? WHERE lane_key=?')->execute([$body['concurrency'],gmdate('c'),$key]);
+            $find=$pdo->prepare('SELECT concurrency FROM download_lanes WHERE lane_key=?'); $find->execute([$key]); $limit=(int)$find->fetchColumn();
+            $pdo->commit();
+        } catch (Throwable $error) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $error; }
+        json_response(['ok'=>true,'concurrency'=>$limit,'serverMax'=>download_concurrency_limit()]);
+    }
+    if ($action === 'download-status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        authenticate_writer(); $body=json_input(); $tokens=$body['collectionTokens']??null;
+        if (!is_array($tokens) || !array_is_list($tokens) || count($tokens)<1 || count($tokens)>100 || count(array_filter($tokens,'valid_collection_token'))!==count($tokens)) {
+            json_response(['ok'=>false,'error'=>'Submit between 1 and 100 collection identities.'],400);
+        }
+        json_response(['ok'=>true,...download_status_for_tokens(db(),$tokens)]);
+    }
     if ($action === 'check' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         authenticate_writer(); $body=json_input(); $ids=$body['imageIds']??null;
         if (!is_array($ids) || !array_is_list($ids) || count($ids)<1 || count($ids)>100 || count(array_filter($ids,'valid_image_id'))!==count($ids)) {
@@ -124,6 +145,9 @@ try {
         authenticate_writer();
         $body=json_input(); $items=$body['items'] ?? null;
         if (!is_array($items) || !array_is_list($items) || count($items)<1 || count($items)>100) json_response(['ok'=>false,'error'=>'Submit between 1 and 100 records.'],400);
+        foreach ($items as $item) if (is_array($item) && array_key_exists('collectionToken',$item) && !valid_collection_token($item['collectionToken'])) {
+            json_response(['ok'=>false,'error'=>'Invalid collection identity.'],400);
+        }
         $pdo=db(); $now=gmdate('c'); $saved=0; $skipped=0; $queuedIds=[]; $skippedItems=[];
         $existing=$pdo->prepare('SELECT * FROM images WHERE image_id=?');
         $upsert=$pdo->prepare("INSERT INTO images(image_id,source_url,prompt,negative_prompt,tags_json,model_name,loras_json,reactions_json,image_width,image_height,style_category,style_confidence,style_signals_json,download_status,discovered_at,updated_at)
@@ -192,6 +216,10 @@ try {
                 }
                 $saved++;
                 if ($storage['needsDownload'] && (!$prior || $storage['downloadStatus']==='pending')) $queuedIds[(string)$item['id']]=true;
+                if (isset($item['collectionToken']) && (!$prior || $storage['downloadStatus']==='pending')) {
+                    $laneKey=hash('sha256',$item['collectionToken']); ensure_download_lane($pdo,$laneKey);
+                    $pdo->prepare('INSERT OR IGNORE INTO image_download_lanes(image_id,lane_key) VALUES(?,?)')->execute([(string)$item['id'],$laneKey]);
+                }
             }
             $pdo->commit();
         } catch (Throwable $error) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $error; }
@@ -199,6 +227,8 @@ try {
         json_response(['ok'=>true,'accepted'=>$saved,'skipped'=>$skipped,'skippedItems'=>$skippedItems,'imageCopiesQueued'=>count($queuedIds)]);
     }
     json_response(['ok'=>false,'error'=>'Not found.'],404);
+} catch (DownloadLaneCapacity $error) {
+    header('Retry-After: 60'); json_response(['ok'=>false,'error'=>$error->getMessage()],503);
 } catch (StorageLockBusy $error) {
     header('Retry-After: 2'); json_response(['ok'=>false,'error'=>'Image storage is busy; retry this batch shortly.'],503);
 } catch (Throwable $error) {

@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.10', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.11', ROOT_ID = '__iss_panel_root';
   if (window.__ISS_PANEL_VERSION === VERSION) { window.__ISS_TOGGLE_PANEL?.(); return; }
   window.__ISS_DISPOSE_PANEL?.();
   document.getElementById(ROOT_ID)?.remove();
@@ -25,6 +25,7 @@
       <header><span class="mark" aria-hidden="true">⌗</span><div><h2>Index Civitai</h2><small>This tab · server collection · v${VERSION}</small></div><button id="close" class="close" aria-label="Hide Index Civitai" title="Hide panel; indexing continues">×</button></header>
       <main><p class="state"><i id="dot" class="dot"></i><span id="runState">Ready to index</span></p><p id="connectionStatus" class="hint" role="status"></p><div class="stats"><div class="stat"><b id="synced">0</b><span>Records accepted</span></div><div class="stat"><b id="stored">0</b><span>Copies skipped</span></div><div class="stat"><b id="promptless">0</b><span>No prompt</span></div></div><p id="queueStatus" class="hint" role="status"></p><p id="pipelineStats" class="hint" role="status"></p><p id="status" class="status" role="status" aria-live="polite"></p><p id="sourceNotice" class="hint" role="status"></p><p id="activity" class="hint" role="status"></p><p id="sourceStatus" class="hint" role="status"></p><p class="hint">This tab’s automatic and feed counts are combined above. The server downloads image files after records are accepted. Shared file counts are in Browsing &amp; activity. Images without a positive prompt are skipped.</p><div id="browse" class="browse">Checking automatic scrolling…</div></main>
       <div class="speed-wrap"><section class="speed-control" aria-labelledby="speedHeading"><div class="speed-heading"><label id="speedHeading" for="collectionSpeed">Collection speed</label><output id="speedValue" for="collectionSpeed">1×</output></div><input id="collectionSpeed" type="range" min="1" max="5" step="0.5" value="1" disabled aria-describedby="speedHelp speedEffective"><div class="speed-scale" aria-hidden="true"><span>1× Normal</span><span>3×</span><span>5×</span></div><p id="speedHelp" class="hint">Adjusts discovery, scrolling, and prompt reading across all Civitai tabs. Speed is a target, not guaranteed throughput. Server/CDN image downloads run separately.</p><p id="speedEffective" class="hint">Reading effective collection limits…</p><p id="speedStatus" class="hint" role="status" aria-live="polite">Checking collection speed…</p><div class="speed-actions"><button id="speedReset" type="button">Restore 1×</button><button id="speedRetry" type="button" hidden>Retry speed change</button></div></section></div>
+      <div class="speed-wrap"><section class="speed-control" aria-labelledby="downloadHeading"><div class="speed-heading"><label id="downloadHeading" for="downloadConcurrency">Server image transfers for this tab</label><output id="downloadValue" for="downloadConcurrency">32</output></div><input id="downloadConcurrency" type="range" min="4" max="32" step="1" value="32" disabled aria-describedby="downloadHelp downloadStatus"><div class="speed-scale" aria-hidden="true"><span>4</span><span>16</span><span>32</span></div><p id="downloadHelp" class="hint">Up to 32 simultaneous image transfers per tab. All tabs and contributors share 32 server slots, so actual transfers may be lower. This is independent of collection speed. Tab counts cover records submitted with this version; older queued images appear only in shared totals.</p><p id="downloadActivity" class="hint" role="status"></p><p id="downloadStatus" class="hint" role="status" aria-live="polite"></p><button id="downloadRetry" type="button" hidden>Retry transfer setting</button></section></div>
       <div class="actions"><button id="start" class="primary">Scan this tab</button><button id="resume" hidden>Resume tab</button><button id="stop" disabled>Stop tab</button></div>
       <div class="links"><a href="https://search-civitai.xyz/" target="_blank" rel="noopener noreferrer">Open shared library ↗</a><button id="settings">Browsing &amp; activity</button></div>
     </section>`;
@@ -93,6 +94,7 @@
     };
   }
   const speedControl = createSpeedControl(() => { revision++; });
+  const downloadControl = ISSDownloadControl.create({ root: panel, send });
   const compatible = () => backgroundVersion === VERSION && statusProtocol === 1;
   const updateWarning = () => `Panel v${VERSION}; background ${backgroundVersion || 'version unknown (older build)'}. Reload Index Civitai on your browser’s Extensions page, then reopen this panel. Your Civitai tabs can stay open.`;
   function workerMetadata(value) { backgroundVersion = String(value?.backgroundVersion || ''); statusProtocol = Number(value?.statusProtocol) || 0; workerChecked = true; }
@@ -154,7 +156,8 @@
         if (Number.isFinite(value.revision)) { if (value.revision <= portRevision) return; portRevision = value.revision; }
         clearTimeout(handshakeTimer); handshakeTimer = null; portReady = true; reconnectAttempts = 0; revision++;
         state = value.state; browse = value.browse; source = value.source; workerMetadata(value);
-        speedControl.accept(value.config, state?.pipeline?.collectionSpeed || browse?.collectionSpeed, compatible()); render();
+        speedControl.accept(value.config, state?.pipeline?.collectionSpeed || browse?.collectionSpeed, compatible());
+        downloadControl.accept(value.transfers, compatible()); render();
       });
       port.onDisconnect.addListener(() => {
         void chrome.runtime.lastError;
@@ -166,11 +169,12 @@
     if (disposed || refreshing) return; refreshing = true;
     const before = revision;
     try {
-      const values = await Promise.all([send({ type: 'getState' }), send({ type: 'civitai-auto-status' }), send({ type: 'getSourceStatus' }), send({ type: 'getConfig' })]);
+      const values = await Promise.all([send({ type: 'getState' }), send({ type: 'civitai-auto-status' }), send({ type: 'getSourceStatus' }), send({ type: 'getConfig' }), send({ type: 'getDownloadSettings' })]);
       if (disposed || revision !== before) return;
       if (values[0]?.status) state = values[0]; if (values[1]?.ok) browse = values[1]; if (values[2]?.ok) source = values[2];
       workerMetadata(values.find(value => value?.backgroundVersion) || values[3]); revision++;
       speedControl.accept(values[3], state?.pipeline?.collectionSpeed || browse?.collectionSpeed, compatible()); render();
+      downloadControl.accept(values[4]?.transfers, compatible());
     }
     finally { refreshing = false; }
   }
@@ -211,9 +215,9 @@
   $('close').onclick = () => { root.style.display = 'none'; };
   const visible = () => { if (!document.hidden) refresh(); };
   const escape = event => { if (event.key === 'Escape' && event.composedPath?.().includes(root) && root.style.display !== 'none' && (starting || state?.status?.running || (browse?.enabled && !browse?.tabPaused))) stop(); };
-  const timer = setInterval(() => { if (!portReady) refresh(); else render(); }, 2000); document.addEventListener('visibilitychange', visible); document.addEventListener('keydown', escape, true);
+  const timer = setInterval(() => { if (!portReady) refresh(); else render(); downloadControl.tick(); }, 2000); document.addEventListener('visibilitychange', visible); document.addEventListener('keydown', escape, true);
   window.__ISS_TOGGLE_PANEL = () => { root.style.display = root.style.display === 'none' ? 'block' : 'none'; refresh(); };
-  window.__ISS_DISPOSE_PANEL = () => { disposed = true; speedControl.dispose(); ++startEpoch; captureController?.abort(); clearInterval(timer); clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); disconnectStatus(statusPort, true); document.removeEventListener('visibilitychange', visible); document.removeEventListener('keydown', escape, true); root.remove(); };
+  window.__ISS_DISPOSE_PANEL = () => { disposed = true; speedControl.dispose(); downloadControl.dispose(); ++startEpoch; captureController?.abort(); clearInterval(timer); clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); disconnectStatus(statusPort, true); document.removeEventListener('visibilitychange', visible); document.removeEventListener('keydown', escape, true); root.remove(); };
   render(); connectStatus(); refresh();
 })();
 

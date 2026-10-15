@@ -2,6 +2,7 @@
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require __DIR__ . '/lib.php';
+$workerStarted=microtime(true);
 
 class WorkerSourceBackoff extends RuntimeException {
     public function __construct(public readonly int $status, public readonly int $until) {
@@ -97,39 +98,124 @@ function worker_transfer_handle(object $state,int $maxBytes): object {
     return $ch;
 }
 
-/** Fetch one bounded wave without holding image locks or SQLite read cursors. */
-function fetch_image_batch(array $jobs,int $maxBytes,string $spool): array {
-    if (!function_exists('curl_multi_init')) throw new RuntimeException('PHP cURL multi is required.');
-    if (count($jobs)>8) throw new RuntimeException('Image transfer concurrency exceeded.');
-    $multi=curl_multi_init(); $states=[]; $handles=[]; $results=[]; $returned=false;
+/** Publish only counters, never source URLs, prompts, or collection capabilities. */
+function worker_publish_download_status(string $path,array $counts,array $limits,int $globalLimit,string $phase): void {
+    $lanes=[];
+    foreach ($limits as $lane=>$limit) $lanes[$lane]=['active'=>(int)($counts[$lane]??0),'limit'=>(int)$limit];
+    foreach ($counts as $lane=>$active) if (!isset($lanes[$lane])) $lanes[$lane]=['active'=>(int)$active,'limit'=>$globalLimit];
+    $body=json_encode(['updatedAt'=>time(),'active'=>array_sum($counts),'limit'=>$globalLimit,'lanes'=>(object)$lanes,'phase'=>$phase],JSON_THROW_ON_ERROR);
+    $temporary=$path.'.'.bin2hex(random_bytes(5)).'.tmp';
     try {
-        foreach ($jobs as $id=>$job) {
-            $path=$spool.'/'.$id.'.'.bin2hex(random_bytes(8)).'.part';
-            $file=fopen($path,'x+b');
-            if (!$file) throw new RuntimeException('Could not create transfer spool.');
-            chmod($path,0640);
-            $state=(object)['id'=>(string)$id,'url'=>(string)$job['source_url'],'path'=>$path,'file'=>$file,'redirects'=>0];
-            $states[(string)$id]=$state;
-            try {
-                $ch=worker_transfer_handle($state,$maxBytes); $state->handle=$ch;
-                if (curl_multi_add_handle($multi,$ch)!==CURLM_OK) { curl_close($ch); unset($state->handle); throw new RuntimeException('Could not start image transfer.'); }
-                $handles[spl_object_id($ch)]=(string)$id;
-            } catch (Throwable $error) { $results[(string)$id]=['error'=>$error]; }
+        if (file_put_contents($temporary,$body,LOCK_EX)!==strlen($body) || !chmod($temporary,0640) || !rename($temporary,$path)) {
+            throw new RuntimeException('Could not publish download activity.');
         }
-        while ($handles) {
+    } finally { if (is_file($temporary)) @unlink($temporary); }
+}
+
+/**
+ * Keep free transfer slots filled rather than waiting for the slowest file in a
+ * wave. Admission and completion callbacks are serial; image decoding therefore
+ * never multiplies with network concurrency. Completed spools are consumed at
+ * once, bounding both open files and temporary disk usage by the global limit.
+ */
+function fetch_image_pipeline(callable $nextJob,callable $complete,callable $readLimits,int $maxBytes,string $spool,
+    int $globalLimit,float $admissionDeadline,float $finishDeadline,string $statusPath): void {
+    if (!function_exists('curl_multi_init')) throw new RuntimeException('PHP cURL multi is required.');
+    $globalLimit=max(4,min(32,$globalLimit));
+    $multi=curl_multi_init(); $states=[]; $handles=[]; $counts=[]; $limits=[]; $refreshed=0.0; $published=0.0; $phase='downloading';
+    $refresh=static function(bool $force=false) use (&$refreshed,&$limits,$readLimits): void {
+        $now=microtime(true);
+        if ($force || $now-$refreshed>=1.0) { $limits=$readLimits(); $refreshed=$now; }
+    };
+    $publish=static function(bool $force=false) use (&$published,&$counts,&$limits,&$phase,$statusPath,$globalLimit): void {
+        $now=microtime(true);
+        if ($force || $now-$published>=1.0) {
+            worker_publish_download_status($statusPath,$counts,$limits,$globalLimit,$phase); $published=$now;
+        }
+    };
+    $release=static function(string $id) use (&$states,&$handles,&$counts,$multi): void {
+        $state=$states[$id]??null;
+        if (!$state) return;
+        if (isset($state->handle)) {
+            unset($handles[spl_object_id($state->handle)]);
+            curl_multi_remove_handle($multi,$state->handle); curl_close($state->handle); unset($state->handle);
+        }
+        if (is_resource($state->file)) fclose($state->file);
+        @unlink($state->path);
+        if ($state->active) $counts[$state->lane]=max(0,($counts[$state->lane]??1)-1);
+        unset($states[$id]);
+    };
+    try {
+        $refresh(true); $publish(true);
+        while (true) {
+            $refresh();
+            if (microtime(true)>=$finishDeadline) { $phase='finishing'; break; }
+            // A lowered lane limit lets in-flight requests finish, then admits
+            // replacements only when that lane is below its latest setting.
+            while (count($states)<$globalLimit && microtime(true)<$admissionDeadline) {
+                $refresh(); $job=$nextJob($counts,$limits);
+                if ($job===null) break;
+                if (microtime(true)>=$admissionDeadline) break;
+                $id=(string)$job['image_id']; $lane=(string)$job['_lane'];
+                $path=$spool.'/'.$id.'.'.bin2hex(random_bytes(8)).'.part'; $file=null;
+                try {
+                    $file=fopen($path,'x+b');
+                    if (!$file || !chmod($path,0640)) throw new RuntimeException('Could not create transfer spool.');
+                    $state=(object)['id'=>$id,'lane'=>$lane,'active'=>true,'job'=>$job,'url'=>(string)$job['source_url'],'path'=>$path,'file'=>$file,'redirects'=>0];
+                    $states[$id]=$state; $counts[$lane]=($counts[$lane]??0)+1;
+                    $ch=worker_transfer_handle($state,$maxBytes); $state->handle=$ch;
+                    if (curl_multi_add_handle($multi,$ch)!==CURLM_OK) throw new RuntimeException('Could not start image transfer.');
+                    $handles[spl_object_id($ch)]=$id;
+                } catch (Throwable $error) {
+                    if (isset($states[$id])) $release($id);
+                    else { if (is_resource($file)) fclose($file); if (is_file($path)) @unlink($path); }
+                    $complete($job,['error'=>$error]);
+                }
+            }
+            $phase=microtime(true)>=$admissionDeadline?'finishing':'downloading'; $publish();
+            if (!$handles) break;
             do { $code=curl_multi_exec($multi,$running); } while ($code===CURLM_CALL_MULTI_PERFORM);
             if ($code!==CURLM_OK) throw new RuntimeException('Image transfer coordinator failed.');
-            while ($message=curl_multi_info_read($multi)) {
-                $ch=$message['handle']; $key=spl_object_id($ch); $id=$handles[$key]??null;
-                if ($id===null) continue;
-                unset($handles[$key]); $state=$states[$id];
-                $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE); $transferError=curl_error($ch);
-                curl_multi_remove_handle($multi,$ch); curl_close($ch); unset($state->handle);
-                if ($status===429 || ($status>=500 && $status<=599)) {
-                    // Cancel the wave. A shared cooldown never consumes attempts,
-                    // and no additional image is scheduled until it has expired.
-                    throw new WorkerSourceBackoff($status,worker_retry_after_deadline($state->retryAfter));
+            $completed=[];
+            while ($message=curl_multi_info_read($multi)) $completed[]=$message;
+            if (!$completed) {
+                if (curl_multi_select($multi,0.2)===-1) usleep(10000);
+                continue;
+            }
+            // Inspect every response already delivered by this event-loop tick
+            // before admitting replacements. A later queued 429 must not hide
+            // behind an earlier successful image and allow extra starts.
+            foreach ($completed as $message) {
+                $completedId=$handles[spl_object_id($message['handle'])]??null;
+                if ($completedId===null) continue;
+                $completedStatus=(int)curl_getinfo($message['handle'],CURLINFO_RESPONSE_CODE);
+                if ($completedStatus===429 || ($completedStatus>=500 && $completedStatus<=599)) {
+                    $phase='cooldown';
+                    throw new WorkerSourceBackoff($completedStatus,worker_retry_after_deadline($states[$completedId]->retryAfter));
                 }
+            }
+            // Detach every finished handle before thumbnail work so network
+            // activity excludes completed files waiting for serial finalization.
+            foreach ($completed as &$message) {
+                $ch=$message['handle']; $key=spl_object_id($ch); $id=$handles[$key]??null;
+                $message['_id']=$id;
+                if ($id===null) continue;
+                $state=$states[$id];
+                $message['_status']=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
+                $message['_error']=curl_error($ch);
+                unset($handles[$key]);
+                curl_multi_remove_handle($multi,$ch); curl_close($ch); unset($state->handle);
+                $state->active=false;
+                $counts[$state->lane]=max(0,($counts[$state->lane]??1)-1);
+            }
+            unset($message);
+            $phase=$handles?'downloading':'finalizing'; $publish(true);
+            // Finalize completed requests only; do not wait for other active
+            // files. The next loop immediately replenishes the released slots.
+            foreach ($completed as $message) {
+                $id=$message['_id'];
+                if ($id===null) continue;
+                $state=$states[$id]; $status=$message['_status']; $transferError=$message['_error'];
                 try {
                     if ($state->sizeLimit instanceof WorkerImageSizeLimit) throw $state->sizeLimit;
                     if ($state->overflow) throw new RuntimeException('Image exceeded configured size limit.');
@@ -141,8 +227,9 @@ function fetch_image_batch(array $jobs,int $maxBytes,string $spool): array {
                         if (str_starts_with($location,'//')) $location='https:'.$location;
                         elseif (str_starts_with($location,'/')) { $base=parse_url($state->url); $location='https://'.($base['host']??'').$location; }
                         $state->url=$location; $next=worker_transfer_handle($state,$maxBytes); $state->handle=$next;
-                        if (curl_multi_add_handle($multi,$next)!==CURLM_OK) { curl_close($next); unset($state->handle); throw new RuntimeException('Could not follow image redirect.'); }
+                        if (curl_multi_add_handle($multi,$next)!==CURLM_OK) throw new RuntimeException('Could not follow image redirect.');
                         $handles[spl_object_id($next)]=$id;
+                        $state->active=true; $counts[$state->lane]=($counts[$state->lane]??0)+1;
                         continue;
                     }
                     if ($status!==200) throw new RuntimeException('Image host returned HTTP '.$status.'.');
@@ -153,19 +240,28 @@ function fetch_image_batch(array $jobs,int $maxBytes,string $spool): array {
                     $width=(int)($info[0]??0); $height=(int)($info[1]??0);
                     if ($width<=0 || $height<=0) throw new RuntimeException('Image dimensions were invalid.');
                     if (image_size_exceeds_limits($width,$height)) throw new WorkerImageSizeLimit($width,$height);
-                    $results[$id]=['path'=>$state->path,'mime'=>$mime,'size'=>$state->size,'sha256'=>hash_final($state->digest),'width'=>$width,'height'=>$height];
-                } catch (Throwable $error) { $results[$id]=['error'=>$error]; }
+                    $result=['path'=>$state->path,'mime'=>$mime,'size'=>$state->size,'sha256'=>hash_final($state->digest),'width'=>$width,'height'=>$height];
+                } catch (Throwable $error) {
+                    if (isset($state->handle)) {
+                        curl_multi_remove_handle($multi,$state->handle); curl_close($state->handle); unset($state->handle);
+                    }
+                    $result=['error'=>$error];
+                }
+                unset($states[$id]);
+                if (is_resource($state->file)) fclose($state->file);
+                $publish();
+                try { $complete($state->job,$result); }
+                finally { if (is_file($state->path)) @unlink($state->path); }
             }
-            if ($handles && curl_multi_select($multi,0.5)===-1) usleep(10000);
         }
-        $returned=true; return $results;
+        if ($phase!=='cooldown') $phase='idle';
+    } catch (Throwable $error) {
+        if (!($error instanceof WorkerSourceBackoff)) $phase='error';
+        throw $error;
     } finally {
-        foreach ($states as $id=>$state) {
-            if (isset($state->handle)) { curl_multi_remove_handle($multi,$state->handle); curl_close($state->handle); }
-            if (is_resource($state->file)) fclose($state->file);
-            if (!$returned || isset($results[$id]['error'])) @unlink($state->path);
-        }
+        foreach (array_keys($states) as $id) $release((string)$id);
         curl_multi_close($multi);
+        $publish(true);
     }
 }
 
@@ -304,12 +400,15 @@ $cfg=config(); $lockPath=rtrim((string)($cfg['storage_dir']??''),'/').'/.worker.
 if (!str_starts_with($lockPath,'/')) { fwrite(STDERR,"Invalid storage directory\n"); exit(1); }
 if (!is_dir(dirname($lockPath)) && !mkdir(dirname($lockPath),0750,true) && !is_dir(dirname($lockPath))) { fwrite(STDERR,"Cannot create storage directory\n"); exit(1); }
 $lock=fopen($lockPath,'c'); if (!$lock || !flock($lock,LOCK_EX|LOCK_NB)) { fwrite(STDOUT,"worker already running\n"); exit(0); }
+$concurrency=download_concurrency_limit(); $statusPath=dirname($lockPath).'/.download-status.json';
 $backoffPath=dirname($lockPath).'/.worker-backoff.json'; $backoffUntil=worker_backoff_until($backoffPath);
-if ($backoffUntil>time()) { fwrite(STDOUT,'image host cooldown active; retry in '.($backoffUntil-time())." seconds\n"); exit(0); }
-$pdo=db(); $limit=max(1,min(200,(int)($argv[1]??50))); $deadline=microtime(true)+50;
+if ($backoffUntil>time()) {
+    worker_publish_download_status($statusPath,[],[],$concurrency,'cooldown');
+    fwrite(STDOUT,'image host cooldown active; retry in '.($backoffUntil-time())." seconds\n"); exit(0);
+}
+$pdo=db(); $limit=max(1,min(200,(int)($argv[1]??200))); $deadline=$workerStarted+50; $finishDeadline=$workerStarted+85;
 $maxBytes=max(1048576,min(100*1024*1024,(int)($cfg['max_image_bytes']??41943040)));
 $cap=max($maxBytes,(int)($cfg['storage_max_bytes']??107374182400)); $done=0;
-$concurrency=max(1,min(8,(int)($cfg['image_download_concurrency']??4)));
 $storage=(string)($cfg['storage_dir']??''); $root=realpath($storage);
 if (!$root || !str_starts_with($storage,'/')) throw new RuntimeException('Invalid image storage root.');
 $spool=$root.'/.download-tmp';
@@ -324,78 +423,107 @@ $sizes=[]; $used=0;
 $usage=$pdo->query("SELECT file_path,MAX(file_size) size FROM images WHERE file_path IS NOT NULL AND file_path<>'' AND file_size>0 GROUP BY file_path");
 foreach ($usage->fetchAll() as $storedFile) worker_account_file($sizes,$used,(string)$storedFile['file_path'],(int)$storedFile['size']);
 $usage->closeCursor();
-$queue=$pdo->query("SELECT image_id FROM images WHERE download_status='pending' AND LENGTH(TRIM(prompt))>0 ORDER BY discovered_at LIMIT ".$limit)->fetchAll();
-$offset=0;
-fwrite(STDOUT,'download concurrency '.$concurrency.'; bounded spool; storage usage '.$used." bytes\n");
-while ($offset<count($queue) && microtime(true)<$deadline) {
-    $jobs=[];
-    while ($offset<count($queue) && count($jobs)<$concurrency && microtime(true)<$deadline) {
-        $id=(string)$queue[$offset++]['image_id']; $imageLocks=[]; $attempt=0; $localRepair=false;
+// Take oldest work from every lane before taking its next item. The outer limit
+// bounds each worker run without allowing one contributor's backlog to hide all
+// other lanes. Last-served timestamps preserve fairness between worker runs.
+$queue=$pdo->query("WITH ranked AS (
+    SELECT i.image_id,i.discovered_at,COALESCE(m.lane_key,'') lane_key,
+    ROW_NUMBER() OVER (PARTITION BY COALESCE(m.lane_key,'') ORDER BY i.discovered_at,i.image_id) lane_rank
+    FROM images i LEFT JOIN image_download_lanes m ON m.image_id=i.image_id
+    WHERE i.download_status='pending' AND LENGTH(TRIM(i.prompt))>0
+  ) SELECT r.image_id,r.lane_key FROM ranked r LEFT JOIN download_lanes l ON l.lane_key=r.lane_key
+  ORDER BY r.lane_rank,COALESCE(l.last_served_at,''),r.discovered_at,r.image_id LIMIT ".$limit)->fetchAll();
+$queues=[];
+foreach ($queue as $candidate) $queues[(string)$candidate['lane_key']][]=(string)$candidate['image_id'];
+$laneOrder=array_keys($queues); $laneCursor=0;
+$readLimits=static function() use ($pdo,$laneOrder,$concurrency): array {
+    $limits=array_fill_keys($laneOrder,$concurrency);
+    $keys=array_values(array_filter($laneOrder,static fn($lane)=>$lane!==''));
+    if ($keys) {
+        $statement=$pdo->prepare('SELECT lane_key,concurrency FROM download_lanes WHERE lane_key IN ('.implode(',',array_fill(0,count($keys),'?')).')');
         try {
-            $imageLocks=lock_image_ids([$id]); $item=worker_image_row($pdo,$id);
+            $statement->execute($keys);
+            foreach ($statement->fetchAll() as $row) $limits[(string)$row['lane_key']]=min($concurrency,max(4,min(32,(int)$row['concurrency'])));
+        } finally { $statement->closeCursor(); }
+    }
+    return $limits;
+};
+$lastServed=$pdo->prepare('UPDATE download_lanes SET last_served_at=? WHERE lane_key=?');
+$nextJob=static function(array $active,array $limits) use (&$queues,&$laneCursor,$laneOrder,$pdo,$deadline,&$sizes,&$used,&$done,$lastServed): ?array {
+    $laneCount=count($laneOrder);
+    while ($laneCount && microtime(true)<$deadline) {
+        $chosen=null;
+        for ($checked=0;$checked<$laneCount;$checked++) {
+            $index=($laneCursor+$checked)%$laneCount; $lane=(string)$laneOrder[$index];
+            if (empty($queues[$lane]) || ($active[$lane]??0)>=($limits[$lane]??4)) continue;
+            $chosen=$lane; $laneCursor=($index+1)%$laneCount; break;
+        }
+        if ($chosen===null) return null;
+        $id=array_shift($queues[$chosen]); $imageLocks=[]; $attempt=0; $localRepair=false;
+        try {
+            $imageLocks=lock_image_ids([$id],0.0); $item=worker_image_row($pdo,$id);
             if (!$item || $item['download_status']!=='pending' || !has_positive_prompt((string)$item['prompt'])) continue;
+            if ($chosen!=='') {
+                try { $lastServed->execute([gmdate('c'),$chosen]); }
+                catch (PDOException $error) { if (!in_array(((int)($error->errorInfo[1]??0))&255,[5,6],true)) throw $error; }
+            }
             if (image_size_exceeds_limits($item['image_width']??0,$item['image_height']??0)) {
                 throw new WorkerImageSizeLimit((int)($item['image_width']??0),(int)($item['image_height']??0));
             }
             $attempt=(int)$item['download_attempts']; $stored=inspect_stored_image($item);
             if ($stored['exists']) {
-                worker_account_file($sizes,$used,$stored['path'],$stored['size']);
-                $localRepair=true;
+                worker_account_file($sizes,$used,$stored['path'],$stored['size']); $localRepair=true;
                 mark_stored_ready($pdo,$id,$stored,$attempt); $done++;
                 fwrite(STDOUT,"reused {$id} verified SHA256; no network download\n");
-            } else $jobs[$id]=$item;
+            } else { $item['_lane']=$chosen; return $item; }
         } catch (Throwable $error) { worker_record_failure($pdo,$id,$attempt+($localRepair?1:0),$error); }
         finally { unlock_image_ids($imageLocks); }
     }
-    if (!$jobs) continue;
-    try { $results=fetch_image_batch($jobs,$maxBytes,$spool); }
-    catch (WorkerSourceBackoff $error) {
-        save_worker_backoff($backoffPath,$error);
-        fwrite(STDOUT,'image host HTTP '.$error->status.'; paused until '.gmdate('c',$error->until)."; queue and attempts unchanged\n"); break;
-    } catch (Throwable $error) { $results=array_fill_keys(array_keys($jobs),['error'=>$error]); }
-    foreach ($jobs as $id=>$job) {
-        $id=(string)$id; $imageLocks=[]; $attempt=(int)$job['download_attempts'];
-        $result=$results[$id]??['error'=>new RuntimeException('Image transfer returned no result.')];
-        try {
-            if (microtime(true)>$deadline && !(($result['error']??null) instanceof WorkerImageSizeLimit)) {
-                fwrite(STDOUT,"worker deadline {$id}; leaving queue and attempts unchanged\n"); continue;
-            }
-            $imageLocks=lock_image_ids([$id]); $current=worker_image_row($pdo,$id);
-            if (!$current || $current['download_status']!=='pending' || !has_positive_prompt((string)$current['prompt'])) continue;
-            if ((string)$current['source_url']!==(string)$job['source_url']) { fwrite(STDOUT,"source changed {$id}; leaving queue and attempts unchanged\n"); continue; }
-            if (image_size_exceeds_limits($current['image_width']??0,$current['image_height']??0)) {
-                throw new WorkerImageSizeLimit((int)($current['image_width']??0),(int)($current['image_height']??0));
-            }
-            $attempt=max($attempt,(int)$current['download_attempts'])+1;
-            if (isset($result['error'])) throw $result['error'];
-            $mime=$result['mime']; $digest=$result['sha256']; $size=(int)$result['size'];
-            $donors=$pdo->prepare("SELECT * FROM images WHERE sha256=? AND download_status='ready' AND image_id<>? ORDER BY image_id LIMIT 20");
-            $donors->execute([$digest,$id]); $candidates=$donors->fetchAll(); $donors->closeCursor(); $reused=false;
-            foreach ($candidates as $donor) {
-                $shared=inspect_stored_image($donor);
-                if (!$shared['exists'] || $shared['sha256']!==$digest || $shared['mime']!==$mime) continue;
-                worker_account_file($sizes,$used,$shared['path'],$shared['size']);
-                mark_stored_ready($pdo,$id,$shared,$attempt); $done++; $reused=true;
-                fwrite(STDOUT,"ready {$id} reused existing content SHA256 {$digest}\n"); break;
-            }
-            if ($reused) continue;
-            $dir=$root.'/images/'.substr($id,-2).'/'.substr($id,-4,-2);
-            if (!is_dir($dir) && !mkdir($dir,0750,true) && !is_dir($dir)) throw new RuntimeException('Could not create image directory.');
-            $resolved=realpath($dir);
-            if (!$resolved || !str_starts_with($resolved,$root.DIRECTORY_SEPARATOR)) throw new RuntimeException('Image directory escaped configured storage root.');
-            $ext=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp'][$mime]; $path=$resolved.'/'.$id.'.'.$ext;
-            if ($used-($sizes[$path]??0)+$size>$cap) throw new RuntimeException('Image would exceed configured storage cap.');
-            if (!rename($result['path'],$path)) throw new RuntimeException('Could not finalize image file.');
-            // Account immediately after the physical write, even if a subsequent
-            // SQLite/thumbnail operation fails. No other process writes originals.
-            worker_account_file($sizes,$used,$path,$size);
-            mark_stored_ready($pdo,$id,['path'=>$path,'mime'=>$mime,'size'=>$size,'sha256'=>$digest],$attempt); $done++;
-            fwrite(STDOUT,"ready {$id} {$size} bytes\n");
-        } catch (Throwable $error) { worker_record_failure($pdo,$id,$attempt,$error); }
-        finally {
-            unlock_image_ids($imageLocks);
-            if (isset($result['path']) && is_file($result['path'])) @unlink($result['path']);
+    return null;
+};
+$complete=static function(array $job,array $result) use ($pdo,$finishDeadline,&$sizes,&$used,&$done,$cap,$root): void {
+    $id=(string)$job['image_id']; $imageLocks=[]; $attempt=(int)$job['download_attempts'];
+    try {
+        // No new thumbnail begins after 85 seconds. Its bounded 13-second
+        // subprocess still fits within the service's 100-second hard timeout.
+        if (microtime(true)>=$finishDeadline && !(($result['error']??null) instanceof WorkerImageSizeLimit)) {
+            fwrite(STDOUT,"worker deadline {$id}; leaving queue and attempts unchanged\n"); return;
         }
-    }
+        $imageLocks=lock_image_ids([$id],0.0); $current=worker_image_row($pdo,$id);
+        if (!$current || $current['download_status']!=='pending' || !has_positive_prompt((string)$current['prompt'])) return;
+        if ((string)$current['source_url']!==(string)$job['source_url']) { fwrite(STDOUT,"source changed {$id}; leaving queue and attempts unchanged\n"); return; }
+        if (image_size_exceeds_limits($current['image_width']??0,$current['image_height']??0)) {
+            throw new WorkerImageSizeLimit((int)($current['image_width']??0),(int)($current['image_height']??0));
+        }
+        $attempt=max($attempt,(int)$current['download_attempts'])+1;
+        if (isset($result['error'])) throw $result['error'];
+        $mime=$result['mime']; $digest=$result['sha256']; $size=(int)$result['size'];
+        $donors=$pdo->prepare("SELECT * FROM images WHERE sha256=? AND download_status='ready' AND image_id<>? ORDER BY image_id LIMIT 20");
+        $donors->execute([$digest,$id]); $candidates=$donors->fetchAll(); $donors->closeCursor();
+        foreach ($candidates as $donor) {
+            $shared=inspect_stored_image($donor);
+            if (!$shared['exists'] || $shared['sha256']!==$digest || $shared['mime']!==$mime) continue;
+            worker_account_file($sizes,$used,$shared['path'],$shared['size']);
+            mark_stored_ready($pdo,$id,$shared,$attempt); $done++;
+            fwrite(STDOUT,"ready {$id} reused existing content SHA256 {$digest}\n"); return;
+        }
+        $dir=$root.'/images/'.substr($id,-2).'/'.substr($id,-4,-2);
+        if (!is_dir($dir) && !mkdir($dir,0750,true) && !is_dir($dir)) throw new RuntimeException('Could not create image directory.');
+        $resolved=realpath($dir);
+        if (!$resolved || !str_starts_with($resolved,$root.DIRECTORY_SEPARATOR)) throw new RuntimeException('Image directory escaped configured storage root.');
+        $ext=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp'][$mime]; $path=$resolved.'/'.$id.'.'.$ext;
+        if ($used-($sizes[$path]??0)+$size>$cap) throw new RuntimeException('Image would exceed configured storage cap.');
+        if (!rename($result['path'],$path)) throw new RuntimeException('Could not finalize image file.');
+        worker_account_file($sizes,$used,$path,$size);
+        mark_stored_ready($pdo,$id,['path'=>$path,'mime'=>$mime,'size'=>$size,'sha256'=>$digest],$attempt); $done++;
+        fwrite(STDOUT,"ready {$id} {$size} bytes\n");
+    } catch (Throwable $error) { worker_record_failure($pdo,$id,$attempt,$error); }
+    finally { unlock_image_ids($imageLocks); }
+};
+fwrite(STDOUT,'download concurrency '.$concurrency.'; fair rolling lanes '.count($laneOrder).'; bounded spool; storage usage '.$used." bytes\n");
+try { fetch_image_pipeline($nextJob,$complete,$readLimits,$maxBytes,$spool,$concurrency,$deadline,$finishDeadline,$statusPath); }
+catch (WorkerSourceBackoff $error) {
+    save_worker_backoff($backoffPath,$error);
+    fwrite(STDOUT,'image host HTTP '.$error->status.'; paused until '.gmdate('c',$error->until)."; unfinished queue and attempts unchanged\n");
 }
 fwrite(STDOUT,"processed {$done}/".count($queue)." ready\n");

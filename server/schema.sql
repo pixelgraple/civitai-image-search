@@ -43,6 +43,24 @@ CREATE TABLE IF NOT EXISTS image_collection_skips (
   height INTEGER NOT NULL DEFAULT 0,
   skipped_at TEXT NOT NULL
 );
+-- Per-tab transfer preferences use a hash of a browser-generated random capability.
+CREATE TABLE IF NOT EXISTS download_lanes (
+  lane_key TEXT PRIMARY KEY CHECK(length(lane_key)=64),
+  concurrency INTEGER NOT NULL DEFAULT 32 CHECK(concurrency BETWEEN 4 AND 32),
+  updated_at TEXT NOT NULL,
+  last_served_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS image_download_lanes (
+  image_id TEXT PRIMARY KEY REFERENCES images(image_id) ON DELETE CASCADE,
+  lane_key TEXT NOT NULL REFERENCES download_lanes(lane_key) ON DELETE CASCADE,
+  download_status TEXT NOT NULL DEFAULT 'pending' CHECK(download_status IN ('pending','ready','failed'))
+);
+CREATE INDEX IF NOT EXISTS image_download_lane_queue ON image_download_lanes(lane_key,image_id);
+CREATE INDEX IF NOT EXISTS image_download_lane_status ON image_download_lanes(lane_key,download_status);
+CREATE TRIGGER IF NOT EXISTS image_download_lane_status_changed AFTER UPDATE OF download_status ON images
+WHEN OLD.download_status<>NEW.download_status BEGIN
+  UPDATE image_download_lanes SET download_status=NEW.download_status WHERE image_id=NEW.image_id;
+END;
 -- Community votes are independent of the source site's reactions_json metadata.
 CREATE TABLE IF NOT EXISTS community_reaction_settings (
   setting_key TEXT PRIMARY KEY,

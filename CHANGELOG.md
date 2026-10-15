@@ -2,6 +2,14 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.11
+
+- Add a live 4–32 server image-transfer slider per Civitai tab, defaulting to 32.
+- Raise the shared server ceiling to 32 concurrent image transfers with fair scheduling across tab queues.
+- Refill transfer slots as files finish instead of waiting for the slowest file in a wave.
+- Show actual server active/pending/stored counts for each tab, with a single shared status refresh.
+- Retain the 600-image browser queue, 60-record metadata batches, source cooldowns, and 9 MP / 4096 pixel limits.
+
 ## 2.8.10
 
 - Limit collected images to **9,000,000 pixels total** and **4096 pixels on either side**. Both limits apply.

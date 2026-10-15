@@ -1,11 +1,11 @@
 // Index Civitai sends prompt metadata and source URLs to the public shared catalog.
 // The server owns image transfers. This extension has no file download API.
-importScripts('collection-speed.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
+importScripts('collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
 
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.10', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.11', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -26,6 +26,10 @@ const clockTasks = new Map();
 const statusPorts = new Map();
 let statusRevision = 0, statusPushTimer = null, immediateClockTimer = null;
 const storageAccessReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+const downloadSettings = ISSDownloadSettings.create({ post: postCatalog,
+  load: () => readStorage('civitaiDownloadSettingsV1'), save: value => writeStorage('civitaiDownloadSettingsV1', value),
+  tabs: queryCivitaiTabs, tab: getTab, eligible: tab => !!ISSBrowseCollector.page(tab?.url), changed: notifyStatusChanged,
+  cooldownUntil: () => uploadCooldownUntil });
 const catalogChecks = ISSCatalogChecks.create({ post: imageIds => postCatalog('check', { imageIds, allowPartial: true }),
   changed: notifyStatusChanged, cooldownUntil: () => uploadCooldownUntil,
   setTimer: (callback, delay) => setTimeout(callback, delay), clearTimer: timer => clearTimeout(timer) });
@@ -205,7 +209,7 @@ function ensureManualSubmission(run, record) {
   const work = (async () => {
     await admitManualImage(id, run, current); if (!current()) throw Object.assign(new Error('Collection was paused.'), { status: 409 });
     markOutstanding(id, 'manual', run.sessionTabId, 'readyUpload');
-    return syncCloudCatalogItems([record], { isCurrent: current, onAccepted: (batch, stored) => acceptManualRecords(run, batch, stored) });
+    return syncCloudCatalogItems([record], { tabId: run.sessionTabId, isCurrent: current, onAccepted: (batch, stored) => acceptManualRecords(run, batch, stored) });
   })().catch(async error => {
     if (current() && error.status !== 409) {
       if (!(run.uploadRetryAt > Date.now())) run.uploadFailures = (run.uploadFailures || 0) + 1;
@@ -593,7 +597,7 @@ function queuedUpload(task) {
   });
   uploadQueue = result; return result;
 }
-async function syncCloudCatalogItems(records, { required = true, onAccepted, isCurrent = () => true } = {}) {
+async function syncCloudCatalogItems(records, { required = true, onAccepted, tabId, isCurrent = () => true } = {}) {
   if (!Array.isArray(records) || !records.length) return { enabled: true, accepted: 0, alreadyStored: 0, missing: 0, storageItems: [] };
   const uniqueRecords = new Map();
   for (const record of records) {
@@ -610,7 +614,7 @@ async function syncCloudCatalogItems(records, { required = true, onAccepted, isC
     const fresh = !entry;
     if (!entry) { entry = { record, subscribers: new Set(), uploading: false, checking: true }; preparedUploads.set(record.id, entry); }
     else if (!entry.uploading && !entry.selected) entry.record = { ...entry.record, ...record };
-    entry.subscribers.add({ isCurrent, onAccepted, resolve, reject });
+    entry.subscribers.add({ tabId, isCurrent, onAccepted, resolve, reject });
     if (fresh) checkPreparedUpload(entry);
     else if (!entry.checking) scheduleUploadFlush();
     notifyStatusChanged();
@@ -676,7 +680,7 @@ async function flushPreparedUploads() {
     for (const entry of [...preparedUploads.values()]) {
       if (!await liveSubscribers(entry)) continue;
       if (entry.checking || !entry.storageItem) continue;
-      const size = byteLength(entry.record) + 1;
+      const size = byteLength(entry.record) + 100; // Include the private collection token added at send time.
       if (size > 900 * 1024) {
         const error = new Error(`Image ${entry.record.id} has metadata larger than the server upload limit. Its prompt is retained for retry.`);
         for (const subscriber of entry.subscribers) subscriber.reject(error);
@@ -697,7 +701,22 @@ async function flushPreparedUploads() {
       // rechecks under its image lock, closing races with other contributors.
       for (const entry of active) entry.uploading = true;
       notifyStatusChanged();
-      const result = await postCatalog('images', { items: active.map(entry => entry.record) });
+      const items = [];
+      for (const entry of active) {
+        // Ownership belongs to the first subscriber that is still live when
+        // settings are acknowledged. Item payloads never change lane limits.
+        let owner, collectionToken;
+        while (await liveSubscribers(entry)) {
+          owner = [...entry.subscribers][0];
+          collectionToken = await downloadSettings.token(owner.tabId);
+          if (await owner.isCurrent()) break;
+          owner = null;
+        }
+        if (owner) items.push({ ...entry.record, collectionToken });
+      }
+      active = active.filter(entry => items.some(item => item.id === entry.record.id));
+      if (!active.length) return;
+      const result = await postCatalog('images', { items });
       const skipped = result.skippedItems ?? [], skippedById = new Map(), activeIds = new Set(active.map(entry => entry.record.id));
       if (!Array.isArray(skipped)) throw new Error('Shared catalog returned invalid skipped-image details. This batch has been retained for retry.');
       for (const item of skipped) {
@@ -855,7 +874,8 @@ async function buildStatusSnapshot(client) {
   const browse = await getBrowseStatus(client.tabId === null ? undefined : client.tabId);
   const state = compactStatusState(client.tabId === null ? getPublicState()
     : getPublicState(client.tabId, ISSBrowseCollector.page(tab.url).href));
-  return versionStatus({ type: 'index-civitai-status', state, browse, source, config });
+  const transfers = await downloadSettings.snapshot(client.tabId);
+  return versionStatus({ type: 'index-civitai-status', state, browse, source, config, transfers });
 }
 function removeStatusPort(client) {
   if (!statusPorts.has(client.port)) return;
@@ -924,6 +944,7 @@ function collectionClockPulse() {
   driverPulse().catch(error => addDebug('feeds-error', error.message));
   startClockTask('browse', () => autoBrowseCollector.pulse());
   startClockTask('scroll', pulseAutoTabs);
+  startClockTask('server-transfers', () => downloadSettings.poll());
 }
 async function refreshAutoBrowseTabs() {
   const tabs = await queryCivitaiTabs();
@@ -991,6 +1012,18 @@ async function handleMessage(message, sender) {
       const config = await readCloudCatalogConfig();
       return publicStatusConfig(config);
     }
+    case 'getDownloadSettings': {
+      const tabId = controlTabId(message, sender);
+      return versionStatus({ ok: true, transfers: await downloadSettings.get(tabId) });
+    }
+    case 'setDownloadConcurrency': {
+      const tabId = controlTabId(message, sender);
+      return versionStatus({ ok: true, transfers: await downloadSettings.set(tabId, message.concurrency) });
+    }
+    case 'getDownloadTabs': {
+      if (!isExtensionPage(sender)) throw new Error('Choose other tabs from Browsing & activity.');
+      return versionStatus({ ok: true, transfers: await downloadSettings.snapshot() });
+    }
     case 'setCollectionSpeed': {
       const speedMultiplier = ISSCollectionSpeed.normalize(message.speedMultiplier);
       if (isCivitaiSender(sender)) {
@@ -1035,7 +1068,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.runtime.onConnect.addListener(connectStatusPort);
 chrome.action.onClicked.addListener(async tab => {
   if (!ISSBrowseCollector.page(tab?.url)) { await openLibrary(); return; }
-  try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-feed-capture.js', 'panel.js'] }); }
+  try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-feed-capture.js', 'download-control.js', 'panel.js'] }); }
   catch (error) { addDebug('panel-error', error.message); }
 });
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -1044,6 +1077,7 @@ chrome.alarms.onAlarm.addListener(alarm => {
 });
 chrome.tabs.onRemoved.addListener(tabId => {
   ready.then(async () => {
+    await downloadSettings.drop(tabId);
     await autoBrowseCollector.dropTab(tabId);
     await stopSession(tabId, 'source-tab-closed', 'The source tab closed. Reopen this Civitai page to resume its feed.');
     await reconcileOffscreenTicker();

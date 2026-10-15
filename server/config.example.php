@@ -5,7 +5,7 @@ return [
     'storage_dir' => '/data/civitai/media',
     'storage_max_bytes' => 1099511627776, // 1 TiB
     'max_image_bytes' => 41943040, // 40 MiB per image
-    'image_download_concurrency' => 4, // One coordinator; bounded between 1 and 8 transfers.
+    'image_download_concurrency' => 32, // Shared ceiling across every tab; bounded between 4 and 32.
     // Reactions belong to this origin; ingestion keeps its separate extension CORS policy.
     'public_origin' => 'https://search-civitai.xyz',
     'reaction_writes_per_minute' => 60,

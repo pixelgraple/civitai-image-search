@@ -137,6 +137,65 @@ function image_size_limit_message(): string {
     return 'Skipped: exceeds 9 MP or 4096 pixels per side.';
 }
 
+function download_concurrency_limit(): int {
+    return max(4,min(32,(int)(config()['image_download_concurrency']??32)));
+}
+
+function valid_collection_token(mixed $token): bool {
+    return is_string($token) && preg_match('/^[a-f0-9]{64}$/D',$token)===1;
+}
+
+class DownloadLaneCapacity extends RuntimeException {}
+
+/** Caller holds a write transaction; never replace an existing tab preference on ingestion. */
+function ensure_download_lane(PDO $pdo,string $key): void {
+    $find=$pdo->prepare('SELECT updated_at FROM download_lanes WHERE lane_key=?'); $find->execute([$key]);
+    $lastUsed=$find->fetchColumn();
+    if ($lastUsed!==false) {
+        if ((string)$lastUsed<gmdate('c',time()-86400)) $pdo->prepare('UPDATE download_lanes SET updated_at=? WHERE lane_key=?')->execute([gmdate('c'),$key]);
+        return;
+    }
+    if ((int)$pdo->query('SELECT COUNT(*) FROM download_lanes')->fetchColumn()>=10000) {
+        $prune=$pdo->prepare("DELETE FROM download_lanes WHERE lane_key IN (SELECT dl.lane_key FROM download_lanes dl WHERE dl.updated_at<? AND NOT EXISTS (SELECT 1 FROM image_download_lanes m JOIN images i ON i.image_id=m.image_id WHERE m.lane_key=dl.lane_key AND i.download_status='pending') ORDER BY dl.updated_at LIMIT 100)");
+        $prune->execute([gmdate('c',time()-30*86400)]);
+        if ((int)$pdo->query('SELECT COUNT(*) FROM download_lanes')->fetchColumn()>=10000) throw new DownloadLaneCapacity('Transfer settings capacity reached. Retry later.');
+    }
+    $pdo->prepare('INSERT OR IGNORE INTO download_lanes(lane_key,concurrency,updated_at) VALUES(?,32,?)')->execute([$key,gmdate('c')]);
+}
+
+/** The private worker file contains only hashed lane identifiers and bounded counters. */
+function download_worker_status(): array {
+    $empty=['updatedAt'=>null,'active'=>null,'limit'=>download_concurrency_limit(),'phase'=>'waiting for worker status','lanes'=>[]];
+    $root=realpath((string)(config()['storage_dir']??''));
+    if (!$root) return $empty;
+    $path=$root.'/.download-status.json';
+    if (is_link($path) || !is_file($path) || filesize($path)>1048576) return $empty;
+    $state=json_decode((string)@file_get_contents($path),true);
+    if (!is_array($state) || !is_numeric($state['updatedAt']??null) || (int)$state['updatedAt']<time()-20 || (int)$state['updatedAt']>time()+5) return $empty;
+    $state['active']=max(0,min(32,(int)($state['active']??0)));
+    $state['limit']=download_concurrency_limit();
+    $state['lanes']=is_array($state['lanes']??null)?$state['lanes']:[];
+    $state['phase']=cut_text((string)($state['phase']??'running'),80);
+    return $state;
+}
+
+function download_status_for_tokens(PDO $pdo,array $tokens): array {
+    $keys=array_map(static fn($token)=>hash('sha256',$token),$tokens); $unique=array_values(array_unique($keys));
+    $slots=implode(',',array_fill(0,count($unique),'?'));
+    $preferences=$pdo->prepare('SELECT lane_key,concurrency FROM download_lanes WHERE lane_key IN ('.$slots.')');
+    $preferences->execute($unique); $limits=[];
+    foreach ($preferences->fetchAll() as $row) $limits[$row['lane_key']]=(int)$row['concurrency'];
+    $counts=$pdo->prepare("SELECT lane_key,SUM(download_status='pending') pending,SUM(download_status='ready') stored FROM image_download_lanes WHERE lane_key IN (".$slots.') GROUP BY lane_key');
+    $counts->execute($unique); $totals=[];
+    foreach ($counts->fetchAll() as $row) $totals[$row['lane_key']]=$row;
+    $worker=download_worker_status(); $items=[];
+    foreach ($keys as $index=>$key) {
+        $active=$worker['active']===null?null:max(0,min(32,(int)($worker['lanes'][$key]['active']??0)));
+        $items[]=['index'=>$index,'concurrency'=>$limits[$key]??32,'active'=>$active,'pending'=>(int)($totals[$key]['pending']??0),'stored'=>(int)($totals[$key]['stored']??0)];
+    }
+    return ['items'=>$items,'server'=>array_intersect_key($worker,array_flip(['limit','active','updatedAt','phase']))];
+}
+
 function image_collection_skip(PDO $pdo,string $id): ?array {
     $find=$pdo->prepare('SELECT reason,width,height FROM image_collection_skips WHERE image_id=?');
     $find->execute([$id]); return $find->fetch() ?: null;

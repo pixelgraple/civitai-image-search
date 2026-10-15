@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.10', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.11', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
   let saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
   let latest = null, revision = 0, statusPort = null, portReady = false, reconnectTimer = null, handshakeTimer = null, reconnectAttempts = 0, disposed = false;
@@ -69,6 +69,7 @@
     };
   }
   const speedControl = createSpeedControl(() => { revision++; });
+  const downloadControl = ISSDownloadControl.create({ root: document, send, chooseTab: true });
   async function request(action) {
     const headers = { Accept: 'application/json' };
     const response = await fetch(`${API}?action=${action}`, { headers, cache: 'no-store', credentials: 'omit', redirect: 'error' });
@@ -120,6 +121,7 @@
   function applySnapshot(snapshot) {
     latest = snapshot; revision++;
     speedControl.accept(snapshot.config, snapshot.state?.pipeline?.collectionSpeed || snapshot.browse?.collectionSpeed, snapshot.backgroundVersion === VERSION && snapshot.statusProtocol === 1);
+    downloadControl.accept(snapshot.transfers, snapshot.backgroundVersion === VERSION && snapshot.statusProtocol === 1);
     renderSnapshot(snapshot);
   }
   const record = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -158,10 +160,10 @@
     if (disposed || refreshing) return; refreshing = true;
     const before = revision;
     try {
-      const [config, status, scans, source] = await Promise.all([send({ type: 'getConfig' }), send({ type: 'civitai-auto-status' }), send({ type: 'getState' }), send({ type: 'getSourceStatus' })]);
+      const [config, status, scans, source, transfers] = await Promise.all([send({ type: 'getConfig' }), send({ type: 'civitai-auto-status' }), send({ type: 'getState' }), send({ type: 'getSourceStatus' }), send({ type: 'getDownloadTabs' })]);
       if (config?.ok === false || status?.ok === false || scans?.ok === false || source?.ok === false) throw new Error(config?.error || status?.error || scans?.error || source?.error || 'Could not read extension status.');
       if (disposed || revision !== before) return;
-      applySnapshot({ config, browse: status, state: scans, source, backgroundVersion: config.backgroundVersion || scans.backgroundVersion || status.backgroundVersion || '', statusProtocol: config.statusProtocol || scans.statusProtocol || status.statusProtocol || 0 });
+      applySnapshot({ config, browse: status, state: scans, source, transfers: transfers?.transfers, backgroundVersion: config.backgroundVersion || scans.backgroundVersion || status.backgroundVersion || '', statusProtocol: config.statusProtocol || scans.statusProtocol || status.statusProtocol || 0 });
     } catch (error) { if (!disposed && revision === before) { $('browseState').textContent = 'Unavailable'; $('browseStatus').textContent = error.message; } }
     finally { refreshing = false; }
   }
@@ -204,7 +206,7 @@
   });
   $('autoBrowse').addEventListener('change', () => { preferenceDirty = true; });
   connectStatus(); refreshStatus(); checkHealth();
-  const pollTimer = setInterval(() => { if (!portReady) refreshStatus(); else if (latest) renderSnapshot(latest); }, 2000);
+  const pollTimer = setInterval(() => { if (!portReady) refreshStatus(); else if (latest) renderSnapshot(latest); downloadControl.tick(); }, 2000);
   const healthTimer = setInterval(checkHealth, 10000);
-  globalThis.addEventListener?.('pagehide', () => { disposed = true; speedControl.dispose(); clearInterval(pollTimer); clearInterval(healthTimer); clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); disconnectStatus(statusPort, true); });
+  globalThis.addEventListener?.('pagehide', () => { disposed = true; speedControl.dispose(); downloadControl.dispose(); clearInterval(pollTimer); clearInterval(healthTimer); clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); disconnectStatus(statusPort, true); });
 })();

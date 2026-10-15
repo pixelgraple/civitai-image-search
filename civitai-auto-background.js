@@ -385,7 +385,7 @@ globalThis.ISSBrowseCollector = (() => {
     async function submitPrepared({ entry, record, current }, epoch, entryEpoch) {
       try {
         await deps.upsert([record]); if (!await current()) return;
-        const result = await deps.sync([record], { required: true, isCurrent: current });
+        const result = await deps.sync([record], { required: true, tabId: entry.tabId, isCurrent: current });
         if (!await current()) return;
         if (Number(result?.skippedOversize) > 0) { await skipOversize(entry); return; }
         const stored = Number(result?.alreadyStored) || 0;
