@@ -409,6 +409,42 @@ function stored_gallery_preview(string $path): string {
         (int)$info[0]<=720 && (int)$info[1]<=720 ? $full : '';
 }
 
+function card_preview_path(string $path): string {
+    return preg_match('/\.(png|jpe?g|webp)$/i',$path) ? $path.'.card-v1.webp' : '';
+}
+
+function stored_card_preview(string $path): string {
+    $preview=card_preview_path($path); $root=realpath((string)(config()['storage_dir']??''));
+    $full=$preview===''?false:realpath($preview);
+    if (!$root || !$full || !str_starts_with($full,$root.DIRECTORY_SEPARATOR) || !is_file($full) || !is_readable($full)) return '';
+    $info=@getimagesize($full);
+    return ($info['mime']??'')==='image/webp' && (int)($info[0]??0)>0 && (int)($info[1]??0)>0 &&
+        (int)$info[0]<=320 && (int)$info[1]<=720 ? $full : '';
+}
+
+/** Worker/CLI only. Decode the bounded preview, never the full original. */
+function build_card_preview(string $path): bool {
+    if (stored_card_preview($path)!=='') return true;
+    $source=stored_gallery_preview($path); $destination=card_preview_path($path);
+    if ($source==='' || $destination==='' || !function_exists('imagewebp') || !function_exists('imagecreatefromwebp') ||
+        realpath(dirname($destination))!==dirname($source) || filesize($source)>8*1024*1024) return false;
+    $image=null; $out=null; $temporary=$destination.'.'.bin2hex(random_bytes(5)).'.tmp';
+    try {
+        $image=@imagecreatefromwebp($source); if (!$image) return false;
+        $width=imagesx($image); $height=imagesy($image); $scale=min(1,320/$width);
+        $out=imagecreatetruecolor(max(1,(int)round($width*$scale)),max(1,(int)round($height*$scale)));
+        if (!$out) return false;
+        imagealphablending($out,false); imagesavealpha($out,true);
+        if (!imagecopyresampled($out,$image,0,0,0,0,imagesx($out),imagesy($out),$width,$height) || !imagewebp($out,$temporary,78)) return false;
+        $saved=@getimagesize($temporary);
+        if (($saved['mime']??'')!=='image/webp' || (int)($saved[0]??0)<1 || (int)($saved[1]??0)<1 || $saved[0]>320 || $saved[1]>720) return false;
+        return chmod($temporary,0640) && rename($temporary,$destination);
+    } finally {
+        if ($out) imagedestroy($out); if ($image) imagedestroy($image);
+        if (is_file($temporary)) @unlink($temporary);
+    }
+}
+
 /** CLI/worker only: upgrade a bounded legacy thumbnail, never decode an original here. */
 function upgrade_legacy_gallery_preview(string $path,string $mime): bool {
     if (stored_gallery_preview($path)!=='') return true;

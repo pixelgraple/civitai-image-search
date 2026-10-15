@@ -6,6 +6,7 @@
   const protectedFetch = (url, options) => access.fetch(url, options);
   const skeletonMarkup = $('results').innerHTML;
   let libraryStarted = false;
+  let stopGalleryImages = () => {};
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const number = value => Math.max(0, Number(value) || 0);
   const format = value => number(value).toLocaleString();
@@ -87,7 +88,7 @@
   function cardMarkup(row, index) {
     const preview = mediaUrl(row.previewUrl, row.id);
     const label = `View image ${row.id}${row.modelName ? ` · ${row.modelName}` : ''}`;
-    const image = preview ? `<img src="${esc(preview)}"${dimensions(row)} loading="lazy" decoding="async" alt="Indexed image ${esc(row.id)}">` : `<span class="image-fallback"><span class="fallback-symbol" aria-hidden="true">▧</span><b>${esc(statusText(row))}</b><small>Prompt and details are available</small></span>`;
+    const image = preview ? `<img data-preview="${esc(preview)}"${dimensions(row)} decoding="async" alt="Indexed image ${esc(row.id)}">` : `<span class="image-fallback"><span class="fallback-symbol" aria-hidden="true">▧</span><b>${esc(statusText(row))}</b><small>Prompt and details are available</small></span>`;
     return `<article class="image-card"><div class="card-media"><button type="button" class="gallery-open" data-index="${index}" aria-label="${esc(label)}">${image}</button><a class="source-link" href="${esc(sourceUrl(row))}" target="_blank" rel="noopener noreferrer" aria-label="Open image ${esc(row.id)} on Civitai" title="Open on Civitai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l2-2"></path></svg></a><span class="image-category category-${esc(row.category || 'uncertain')}">${esc(styleNames[row.category] || 'Uncertain')}</span></div><div class="reaction-strip"><span class="card-community-upvotes" data-community-id="${esc(row.id)}" title="${format(row.communityReactions?.upvote)} community upvotes on Search Civitai" aria-label="${format(row.communityReactions?.upvote)} community upvotes"><span aria-hidden="true">↑</span><b>${format(row.communityReactions?.upvote)}</b></span><span class="card-source-reactions" aria-label="Read-only Civitai source reactions">${reactionMarkup(row)}</span></div></article>`;
   }
   function markImageErrors(root) {
@@ -207,16 +208,20 @@
       if (targetPage > pages) return loadPage(pages, options);
       state.page = Math.max(1, number(data.page)); state.pages = pages; state.total = number(data.total); state.items = data.items; state.filters = filters;
       $('resultCount').textContent = layoutPreview ? `${format(state.total)} preview cards${state.total ? ' · 1 real stored image · not library counts' : ''}` : `${format(state.total)} matching image${state.total === 1 ? '' : 's'}${state.total ? ` · ${format((state.page - 1) * state.limit + 1)}–${format((state.page - 1) * state.limit + state.items.length)}` : ''}`;
+      stopGalleryImages();
       $('results').innerHTML = state.items.length ? state.items.map(cardMarkup).join('') : '<div class="empty"><span class="empty-symbol" aria-hidden="true">⌕</span><h1>No matching images</h1><p>Try a different prompt keyword or clear your filters. This search covers images already indexed by the community.</p><button type="button" id="emptyReset">Clear search and filters</button></div>';
       $('results').classList.toggle('is-empty', state.items.length === 0);
       markImageErrors($('results')); syncControls(data.categoryCounts || {}); renderPagination();
+      if (options.scroll) window.scrollTo({ top: 0, behavior: 'instant' });
+      if (window.CivitaiGalleryImages) stopGalleryImages = window.CivitaiGalleryImages.mount($('results'));
+      else $('results').querySelectorAll('img[data-preview]').forEach(img => { img.loading = 'lazy'; img.src = img.dataset.preview; });
       if (options.keepViewer && state.items.length) { state.viewerIndex = options.last ? state.items.length - 1 : 0; renderViewer(); }
-      if (options.scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
       return true;
     } catch (error) {
       if (error.name === 'AbortError' || error.name === 'AccessRequiredError' || request !== state.request || !access.isVerified()) return false;
       if (options.keepViewer) { $('viewerStatus').textContent = error.message || 'Unable to load the next page.'; renderPagination(); }
       else {
+        stopGalleryImages();
         $('resultCount').textContent = error.name === 'SearchInputError' ? 'Adjust your search' : 'Search unavailable';
         $('results').classList.add('is-empty');
         $('results').innerHTML = `<div class="empty"><h1>${error.name === 'SearchInputError' ? 'Check your search filters' : 'The library is temporarily unavailable'}</h1><p>${esc(error.message)}</p><button type="button" id="retrySearch">Try again</button></div>`;
@@ -488,6 +493,7 @@
   window.addEventListener('civitai-access-change', event => {
     if (event.detail?.verified) { if (libraryStarted) loadUnlockedLibrary(); return; }
     state.request++; state.reactionRequest++; state.controller?.abort(); state.reactionController?.abort();
+    stopGalleryImages();
     state.returnFocus = null; closeViewer(); state.viewerIndex = -1; state.viewerBusy = false;
     state.items = []; state.community = null; state.pendingFilters = null; state.total = 0; state.page = 1; state.pages = 1;
     $('viewerMedia').replaceChildren(); $('viewerDetails').replaceChildren(); $('viewerReactions').replaceChildren();

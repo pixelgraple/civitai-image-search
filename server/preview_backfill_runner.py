@@ -4,14 +4,19 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 
 php = os.environ.get('CIVITAI_PHP_BINARY', '/www/server/php/84/bin/php')
 script = Path(__file__).with_name('preview_backfill.php')
+cards = sys.argv[1:] == ['--cards']
+if sys.argv[1:] and not cards:
+    raise SystemExit('Usage: preview_backfill_runner.py [--cards]')
 for _ in range(2000):
     result = subprocess.run(
         [php, '-d', 'memory_limit=128M', str(script), '--limit=200',
-         '--pause-ms=100', '--max-seconds=40'],
+         '--pause-ms=0' if cards else '--pause-ms=100', '--max-seconds=40',
+         *(['--cards'] if cards else [])],
         text=True, capture_output=True, timeout=75,
     )
     if result.stderr:

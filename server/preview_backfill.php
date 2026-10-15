@@ -6,12 +6,13 @@ require __DIR__.'/lib.php';
 // Run as the media owner, under nice/ionice. Repeated invocations resume from a
 // small cursor file; originals and catalog rows are never written. --ids warms
 // a specific result page without moving the background cursor.
-$options=getopt('',['limit:','pause-ms:','max-seconds:','after:','ids:','help']);
+$options=getopt('',['limit:','pause-ms:','max-seconds:','after:','ids:','cards','help']);
+$cards=isset($options['cards']);
 if (isset($options['help'])) {
-    fwrite(STDOUT,"Usage: php preview_backfill.php [--limit=100] [--pause-ms=100] [--max-seconds=40] [--after=ID] [--ids=ID,ID]\n"); exit;
+    fwrite(STDOUT,"Usage: php preview_backfill.php [--cards] [--limit=100] [--pause-ms=100] [--max-seconds=40] [--after=ID] [--ids=ID,ID]\n"); exit;
 }
 $limit=max(1,min(500,(int)($options['limit']??100)));
-$pause=max(50,min(5000,(int)($options['pause-ms']??100)));
+$pause=max($cards?0:50,min(5000,(int)($options['pause-ms']??100)));
 $maxSeconds=max(1,min(300,(int)($options['max-seconds']??40)));
 $root=realpath((string)(config()['storage_dir']??''));
 if (!$root || !is_writable($root)) { fwrite(STDERR,"Image storage is unavailable or not writable.\n"); exit(1); }
@@ -19,7 +20,7 @@ if (!function_exists('imagewebp')) { fwrite(STDERR,"GD WebP encoding is unavaila
 $lock=fopen($root.'/.gallery-preview-backfill.lock','c');
 if (!$lock || !flock($lock,LOCK_EX|LOCK_NB)) { fwrite(STDOUT,"Preview backfill already running.\n"); exit; }
 chmod($root.'/.gallery-preview-backfill.lock',0640);
-$statePath=$root.'/.gallery-preview-backfill-v1.json'; $saved=[]; $ids=[];
+$statePath=$root.($cards?'/.card-preview-backfill-v1.json':'/.gallery-preview-backfill-v1.json'); $saved=[]; $ids=[];
 if (isset($options['ids'])) {
     $ids=array_values(array_unique(explode(',',(string)$options['ids'])));
     if (!$ids || count($ids)>500 || array_filter($ids,static fn($id)=>!preg_match('/^[1-9][0-9]{0,19}$/D',$id))) {
@@ -55,7 +56,15 @@ foreach ($rows as $row) {
     if (microtime(true)-$started>=$maxSeconds) break;
     $path=(string)$row['file_path']; $mime=(string)$row['mime_type'];
     try {
-        if (stored_gallery_preview($path)!=='') $counts['alreadyCached']++;
+        if ($cards) {
+            if (stored_card_preview($path)!=='') $counts['alreadyCached']++;
+            elseif (build_card_preview($path)) {
+                $counts['upgraded']++;
+                $counts['legacyBytes']+=(int)@filesize(gallery_preview_path($path));
+                $counts['previewBytes']+=(int)@filesize(card_preview_path($path));
+            } else $counts['skipped']++;
+        }
+        elseif (stored_gallery_preview($path)!=='') $counts['alreadyCached']++;
         elseif (upgrade_legacy_gallery_preview($path,$mime)) {
             $counts['upgraded']++;
             $counts['legacyBytes']+=(int)@filesize(thumbnail_path($path));

@@ -265,7 +265,14 @@ function fetch_image_pipeline(callable $nextJob,callable $complete,callable $rea
     }
 }
 
-/** Isolate oversized decoding in a tightly bounded ImageMagick subprocess. */
+function worker_animated_webp(string $source,string $mime): bool {
+    if ($mime!=='image/webp') return false;
+    $head=@file_get_contents($source,false,null,0,21);
+    return is_string($head) && strlen($head)===21 && substr($head,0,4)==='RIFF' &&
+        substr($head,8,8)==='WEBPVP8X' && (ord($head[20])&2)!==0;
+}
+
+/** Isolate decoding in a tightly bounded child process. */
 function worker_large_thumbnail(string $source,string $destination,string $mime,?string $outputMime=null): bool {
     if (!function_exists('proc_open') || !is_executable('/usr/bin/convert') || !is_executable('/usr/bin/prlimit')) return false;
     $format=['image/jpeg'=>'jpeg','image/png'=>'png','image/webp'=>'webp'][$mime]??'';
@@ -278,6 +285,11 @@ function worker_large_thumbnail(string $source,string $destination,string $mime,
     $command=['/usr/bin/prlimit','--as=671088640','--cpu=12','--','/usr/bin/convert','-limit','thread','1','-limit','memory','64MiB','-limit','map','64MiB',
         '-limit','disk','1024MiB','-limit','time','12','-limit','area','16MP',
         $format.':'.$source.'[0]','-thumbnail','720x720>','-strip','-quality','80',$outputFormat.':'.$destination];
+    if (worker_animated_webp($source,$mime) && is_executable('/usr/bin/python3') && is_file(__DIR__.'/thumbnail_frame.py')) {
+        // Pillow decodes only the first frame; ImageMagick may allocate the
+        // complete animation even when asked for [0]. The same OS limits apply.
+        $command=['/usr/bin/prlimit','--as=671088640','--cpu=12','--','/usr/bin/python3',__DIR__.'/thumbnail_frame.py',$source,$destination,$outputFormat];
+    }
     $process=null; $pipes=[]; $code=-1; $until=microtime(true)+13;
     try {
         $process=proc_open($command,[0=>['file','/dev/null','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes,null,
@@ -312,6 +324,10 @@ function save_thumbnail(string $source,string $destination,string $mime,?string 
     // PNGs can expand far beyond the worker's cgroup memory budget.
     $info=@getimagesize($source); $width=(int)($info[0]??0); $height=(int)($info[1]??0);
     if ($width<=0 || $height<=0 || ($info['mime']??'')!==$mime) throw new RuntimeException('Invalid original dimensions for thumbnail.');
+    if (worker_animated_webp($source,$mime)) {
+        if (worker_large_thumbnail($source,$destination,$mime,$outputMime)) return;
+        throw new RuntimeException('Animated image preview could not be decoded within the worker limits.');
+    }
     $scale=min(1,720/max($width,$height)); $outWidth=max(1,(int)round($width*$scale)); $outHeight=max(1,(int)round($height*$scale));
     $limit=trim((string)ini_get('memory_limit')); $memoryLimit=(float)$limit;
     if (preg_match('/([kmg])$/i',$limit,$match)) $memoryLimit*=1024**(['k'=>1,'m'=>2,'g'=>3][strtolower($match[1])]);
@@ -344,6 +360,12 @@ function save_thumbnail(string $source,string $destination,string $mime,?string 
 }
 
 function ensure_thumbnail(string $source,string $mime): void {
+    ensure_large_thumbnail($source,$mime);
+    try { build_card_preview($source); }
+    catch (Throwable $error) { fwrite(STDERR,'small preview deferred '.basename($source).': '.$error->getMessage()."\n"); }
+}
+
+function ensure_large_thumbnail(string $source,string $mime): void {
     if (stored_gallery_preview($source)!=='') return;
     $compactFailed=false;
     if (function_exists('imagewebp')) {
