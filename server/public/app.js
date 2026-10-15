@@ -8,7 +8,7 @@
   const reactionTypes = [['likeCount', '👍', 'likes'], ['heartCount', '❤️', 'hearts'], ['laughCount', '😂', 'laughs'], ['cryCount', '😭', 'cries'], ['buzzCount', '⚡', 'Buzz']];
   const communityTypes = [['upvote', '↑', 'Upvote'], ['heart', '❤️', 'Love'], ['laugh', '😂', 'Laugh'], ['wow', '😮', 'Wow']];
   const layoutPreview = new URL(location.href).searchParams.get('preview') === 'layout';
-  const defaultFilters = { q: '', qMode: 'all', tag: '', tagMode: 'all', lora: '', creator: '', category: '', sort: 'newest' };
+  const defaultFilters = { q: '', qMode: 'all', tag: '', tagMode: 'all', tagMatch: 'list', lora: '', creator: '', category: '', sort: 'newest' };
   const filterControls = { q: 'query', qMode: 'qMode', tag: 'tag', tagMode: 'tagMode', lora: 'lora', creator: 'creator', category: 'category', sort: 'sort' };
   const state = { page: 1, pages: 1, limit: layoutPreview ? 48 : 42, total: 0, items: [], filters: { ...defaultFilters }, pendingFilters: null, request: 0, controller: null, viewerIndex: -1, viewerBusy: false, returnFocus: null, reactionRequest: 0, reactionController: null, community: null };
   const reactionWrites = new Map();
@@ -51,9 +51,12 @@
     }, { once: true }));
   }
   function currentFilters() {
+    const tag = $('tag').value.trim();
+    const exactTag = tag !== '' && $('tag').dataset.exactTag === tag;
     return {
       q: $('query').value.trim(), qMode: $('qMode').value === 'any' ? 'any' : 'all',
-      tag: $('tag').value.split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean).join(', '),
+      tag: exactTag ? tag : tag.split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean).join(', '),
+      tagMatch: exactTag ? 'exact' : 'list',
       tagMode: $('tagMode').value === 'any' ? 'any' : 'all', lora: $('lora').value.trim(),
       creator: $('creator').value.trim().replace(/^@+/, ''), category: $('category').value,
       sort: ['upvotes', 'civitai_reactions'].includes($('sort').value) ? $('sort').value : 'newest'
@@ -61,6 +64,13 @@
   }
   function setControls(filters) {
     Object.entries(filterControls).forEach(([key, id]) => { $(id).value = filters[key] ?? defaultFilters[key]; });
+    $('tag').dataset.exactTag = filters.tagMatch === 'exact' ? filters.tag : '';
+    syncTagHelp();
+  }
+  function syncTagHelp() {
+    $('tagHelp').textContent = $('tag').dataset.exactTag
+      ? 'Searching the complete clicked tag, including any punctuation. Edit this field to enter comma-separated tags.'
+      : 'Separate up to 20 exact tags with commas. AND requires every tag; OR accepts any tag.';
   }
   function syncControls(counts = {}) {
     const selected = state.filters.category;
@@ -79,7 +89,7 @@
     const filters = state.filters;
     const summaries = [
       ['q', filters.q ? `${filters.qMode === 'any' ? 'OR' : 'AND'} words: ${filters.q}` : ''],
-      ['tag', filters.tag ? `${filters.tagMode === 'any' ? 'OR' : 'AND'} tags: ${filters.tag}` : ''],
+      ['tag', filters.tag ? `${filters.tagMatch === 'exact' ? 'Tag' : filters.tagMode === 'any' ? 'OR tags' : 'AND tags'}: ${filters.tag}` : ''],
       ['lora', filters.lora ? `LoRA: ${filters.lora}` : ''],
       ['creator', filters.creator ? `Creator: @${filters.creator}` : ''],
       ['category', filters.category ? `Style: ${styleNames[filters.category] || filters.category}` : '']
@@ -287,6 +297,11 @@
     renderCommunityReactions();
     const tags = Array.isArray(row.tags) ? row.tags : [], loras = Array.isArray(row.loras) ? row.loras : [];
     $('viewerDetails').innerHTML = `<section class="detail-section detail-identity"><div class="detail-heading"><h1 id="viewerTitle">Image #${esc(row.id)}</h1><span class="detail-style">${esc(styleNames[row.category] || 'Uncertain')}</span></div><p class="detail-meta">${esc(statusText(row))}</p></section>${tags.length ? `<section class="detail-section"><h2>Tags <span>${format(tags.length)}</span></h2><div class="detail-tags">${tags.map(tag => `<button type="button" class="detail-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div></section>` : ''}<section class="detail-section"><div class="detail-heading"><h2>Prompt</h2>${row.prompt ? '<button type="button" id="copyPrompt" class="copy-button">Copy</button>' : ''}</div><div class="prompt-text">${row.prompt ? esc(row.prompt) : '<span class="muted">No prompt was included in the source metadata.</span>'}</div></section>${row.negativePrompt ? `<details class="detail-section negative-prompt"><summary>Negative prompt</summary><div class="prompt-text">${esc(row.negativePrompt)}</div></details>` : ''}<section class="detail-section"><h2>Generation resources</h2><dl class="resources"><dt>Model</dt><dd>${row.modelName ? esc(row.modelName) : '<span class="muted">Not available</span>'}</dd><dt>LoRAs</dt><dd>${loras.length ? loras.map(name => `<button type="button" class="resource-name resource-search" data-lora="${esc(name)}" title="Search for this LoRA">${esc(name)}<span aria-hidden="true">↗</span></button>`).join('') : '<span class="muted">Not available</span>'}</dd></dl></section><section class="detail-section classification"><h2>Library style</h2><p>${esc(styleNames[row.category] || 'Uncertain')}</p><small>Anime includes fantasy, illustration and animation cues in prompts, tags, model or LoRA names. Other images are sorted as Realistic.</small></section>`;
+    $('viewerDetails').querySelectorAll('[data-tag]').forEach(button => {
+      const label = `Find all images tagged ${button.dataset.tag}`;
+      button.title = label;
+      button.setAttribute('aria-label', label);
+    });
     if (row.creatorName) $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('beforeend', `<button type="button" class="creator-search" data-creator="${esc(row.creatorName)}" title="Find images by this creator"><span>Creator</span><b>@${esc(String(row.creatorName).replace(/^@+/, ''))}</b><span aria-hidden="true">↗</span></button>`);
     $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('afterend', `<section class="detail-section source-reaction-section"><div class="detail-heading"><h2>Civitai source reactions</h2><span class="read-only-label">Read-only</span></div><div class="source-reaction-values">${reactionMarkup(row, true)}</div><p>Captured when indexed. Your community reactions are counted separately on this site.</p></section>`);
     $('viewerPrev').disabled = state.viewerBusy || absoluteIndex <= 0;
@@ -322,6 +337,16 @@
     setControls({ ...(state.pendingFilters || state.filters), [key]: value });
     applyFilters();
   }
+  function searchTag(value) {
+    const tag = String(value || '').trim();
+    if (!tag) return;
+    const filters = { ...defaultFilters, tag, tagMatch: 'exact', sort: (state.pendingFilters || state.filters).sort };
+    setControls(filters);
+    $('filterPanel').open = false;
+    state.returnFocus = $('resultCount');
+    closeViewer();
+    loadPage(1, { filters, scroll: true });
+  }
   async function loadHealth() {
     try {
       const response = await fetch('api.php?action=health', { headers: { Accept: 'application/json' }, cache: 'no-store' });
@@ -331,6 +356,7 @@
   }
   $('searchForm').addEventListener('submit', event => { event.preventDefault(); search(); });
   $('applyFilters').addEventListener('click', applyFilters);
+  $('tag').addEventListener('input', () => { delete $('tag').dataset.exactTag; syncTagHelp(); });
   ['tag', 'lora', 'creator'].forEach(id => $(id).addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); applyFilters(); } }));
   $('qMode').addEventListener('change', search);
   $('sort').addEventListener('change', () => searchRelated('sort', $('sort').value));
@@ -357,7 +383,7 @@
   });
   $('viewerDetails').addEventListener('click', async event => {
     const tag = event.target.closest('[data-tag]');
-    if (tag) { searchRelated('tag', tag.dataset.tag); return; }
+    if (tag) { searchTag(tag.dataset.tag); return; }
     const lora = event.target.closest('[data-lora]');
     if (lora) { searchRelated('lora', lora.dataset.lora); return; }
     const creator = event.target.closest('[data-creator]');

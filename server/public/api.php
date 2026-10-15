@@ -115,14 +115,17 @@ try {
         $lora=search_parameter('lora','',200); $creator=ltrim(search_parameter('creator','',200),'@');
         $category=search_parameter('category','',20); $sort=search_parameter('sort','newest',30);
         $qMode=search_parameter('qMode','all',3); $tagMode=search_parameter('tagMode','all',3);
+        $tagMatch=search_parameter('tagMatch','list',5);
         $pageText=search_parameter('page','1',6); $limitText=search_parameter('limit','24',3);
         if (!ctype_digit($pageText) || !ctype_digit($limitText)) json_response(['ok'=>false,'error'=>'Page and limit must be positive numbers.'],400);
         $page=max(1,min(100000,(int)$pageText)); $limit=max(1,min(48,(int)$limitText));
         if (!in_array($sort, ['newest','upvotes','civitai_reactions'], true)) json_response(['ok'=>false,'error'=>'Invalid sort order.'], 400);
         if (!in_array($category, ['', 'anime', 'realistic', 'uncertain'], true)) json_response(['ok'=>false,'error'=>'Invalid category.'], 400);
         if (!in_array($qMode,['all','any'],true) || !in_array($tagMode,['all','any'],true)) json_response(['ok'=>false,'error'=>'Use all or any for keyword and tag matching.'],400);
+        if (!in_array($tagMatch,['list','exact'],true)) json_response(['ok'=>false,'error'=>'Use list or exact for tag input.'],400);
         $terms = preg_split('/[^\p{L}\p{N}]+/u', lower_text($q), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        $tags=array_values(array_filter(array_map(static fn($value)=>lower_text(trim($value)),preg_split('/[,\r\n]+/u',$tag)?:[]),static fn($value)=>$value!==''));
+        $tagValues=$tagMatch==='exact' ? [$tag] : (preg_split('/[,\r\n]+/u',$tag)?:[]);
+        $tags=array_values(array_filter(array_map(static fn($value)=>lower_text(trim($value)),$tagValues),static fn($value)=>$value!==''));
         if (count($terms)>20 || count($tags)>20 || array_filter($tags,static fn($value)=>text_length($value)>200)) json_response(['ok'=>false,'error'=>'Use at most 20 keywords and 20 tags; each tag may contain up to 200 characters.'],400);
         $terms=array_values(array_unique($terms)); $tags=array_values(array_unique($tags));
         $where = ['NOT EXISTS (SELECT 1 FROM image_collection_skips sk WHERE sk.image_id=i.image_id)']; $args = [];

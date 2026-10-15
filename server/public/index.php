@@ -54,7 +54,7 @@ header('X-Frame-Options: DENY');
       <div id="topics" class="topic-chips" role="group" aria-label="Quick prompt searches">
         <button type="button" data-query="" aria-pressed="true" class="is-active">All</button><button type="button" data-query="animal" aria-pressed="false">Animal</button><button type="button" data-query="beach" aria-pressed="false">Beach</button><button type="button" data-query="cartoon" aria-pressed="false">Cartoon</button><button type="button" data-query="cat" aria-pressed="false">Cat</button><button type="button" data-query="cosplay" aria-pressed="false">Cosplay</button><button type="button" data-query="cyberpunk" aria-pressed="false">Cyberpunk</button><button type="button" data-query="dog" aria-pressed="false">Dog</button><button type="button" data-query="dragon" aria-pressed="false">Dragon</button><button type="button" data-query="fantasy" aria-pressed="false">Fantasy</button><button type="button" data-query="landscape" aria-pressed="false">Landscape</button><button type="button" data-query="mecha" aria-pressed="false">Mecha</button><button type="button" data-query="portrait" aria-pressed="false">Portrait</button><button type="button" data-query="selfie" aria-pressed="false">Selfie</button><button type="button" data-query="steampunk" aria-pressed="false">Steampunk</button>
       </div>
-      <div class="resultbar"><span id="resultCount" role="status" aria-live="polite">Loading images…</span><label class="sort-control" for="sort"><span>Sort</span><select id="sort" aria-describedby="sortHelp"><option value="newest">Newest</option><option value="civitai_reactions">Most Civitai reactions</option><option value="upvotes">Community upvotes</option></select></label></div>
+      <div class="resultbar"><span id="resultCount" role="status" aria-live="polite" tabindex="-1">Loading images…</span><label class="sort-control" for="sort"><span>Sort</span><select id="sort" aria-describedby="sortHelp"><option value="newest">Newest</option><option value="civitai_reactions">Most Civitai reactions</option><option value="upvotes">Community upvotes</option></select></label></div>
       <div id="searchContext" class="search-context" hidden><div id="activeFilters" class="active-filters" aria-label="Applied search filters"></div><p id="sortHelp" class="sort-help" hidden>Sorted by captured Civitai likes, hearts, laughs and cries combined. Incomplete counts appear last. Buzz and this site's community votes are excluded.</p></div>
     </section>
     <section id="results" class="results" aria-label="Matching images" aria-busy="true"></section>
@@ -66,6 +66,6 @@ header('X-Frame-Options: DENY');
     <div class="viewer-layout"><div class="viewer-stage"><button id="viewerPrev" class="viewer-arrow viewer-prev" type="button" aria-label="Previous image">‹</button><div id="viewerMedia" class="viewer-media"></div><button id="viewerNext" class="viewer-arrow viewer-next" type="button" aria-label="Next image">›</button><section id="viewerReactions" class="viewer-reactions" aria-label="Community reactions"></section></div><aside id="viewerDetails" class="viewer-details"></aside></div>
     <span id="viewerStatus" class="viewer-status" role="status" aria-live="polite"></span>
   </dialog>
-  <script src="app.js?v=filters-v1"></script>
+  <script src="app.js?v=tag-search-v2"></script>
 </body>
 </html>

@@ -112,6 +112,8 @@ The extension reads Civitai pages and the feed/detail requests used by those pag
 
 Open [the library](https://search-civitai.xyz/), search a word such as `selfie`, `landscape` or `portrait`, and refine by tag or style. Results include matching counts and pagination. Click a card for the full image, readable prompt, tags, generation resources and source link. Copy a prompt or move to the next image directly from the viewer.
 
+Click any tag in the full image viewer to find **all indexed images with that exact tag**, ignoring case. This opens page one of a fresh tag search, clears previous keyword/creator/LoRA/style filters, and keeps your chosen sort order. Tags containing commas or other punctuation are kept as one complete tag. You can then use Filters to narrow those results further.
+
 The layout prioritizes desktop use, with a central image and a right-hand details panel. Mobile layouts are also supported.
 
 Use **All words (AND)** or **Any word (OR)** beside the main search. In **Filters**, enter up to 20 comma-separated exact source tags and choose **All tags (AND)** or **Any tag (OR)**. For example, `selfie, beach` with AND requires both tags; OR accepts either. Separate filled filters always narrow one another.
