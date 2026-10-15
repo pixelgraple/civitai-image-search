@@ -1,6 +1,6 @@
 # Server deployment guide
 
-Index Civitai 2.8.12 consists of a browser extension and a PHP catalog/image worker. The public shared library is https://search-civitai.xyz/. The domain and paths below are deployment examples; substitute your own values for an independent installation.
+Index Civitai 2.8.13 consists of a browser extension and a PHP catalog/image worker. The public shared library is https://search-civitai.xyz/. The domain and paths below are deployment examples; substitute your own values for an independent installation.
 
 ## Requirements and installation
 
@@ -52,7 +52,7 @@ Configure certificate renewal and application log rotation for your environment.
 
 ## Extension connection
 
-Index Civitai 2.8.12 connects only to https://search-civitai.xyz/api.php. Everyone can read, search, check storage, and submit discovered image metadata without a key or account. The extension does not carry SSH credentials, SSH access, image bytes, or permission to download files to the computer. The server worker fetches approved Civitai image URLs into /data/civitai/media. No connection setup or credential sharing is required.
+Index Civitai 2.8.13 connects only to https://search-civitai.xyz/api.php. Everyone can read, search, check storage, and submit discovered image metadata without a key or account. The extension does not carry SSH credentials, SSH access, image bytes, or permission to download files to the computer. The server worker fetches approved Civitai image URLs into /data/civitai/media. No connection setup or credential sharing is required.
 
 ## Public ingestion configuration
 
@@ -98,3 +98,22 @@ Run the new `db()` initializer as the application account before cutting over th
 Search accepts `q`, `qMode=all|any`, comma/newline-separated `tag`, `tagMode=all|any`, `lora`, `creator`, `category`, and `sort=newest|upvotes|civitai_reactions`. Modes default to `all`; words and tags are limited to 20 each. Tags are exact names. LoRA and creator filters match literal case-insensitive fragments; creator strips an optional leading @. Sort totals require all four source social counts; incomplete totals remain null and sort last. Buzz is excluded. Public image rows add `creatorName` and nullable `sourceReactionTotal`.
 
 Image ingestion accepts optional `creatorName`. Source-reaction refreshes also accept creator-only records. Blank or omitted attribution preserves the stored name; older clients continue to work. No mass creator backfill is started by this upgrade. New collector observations enrich attribution during ordinary scans and revisits.
+
+## Metadata repair worker (2.8.13)
+
+The private CLI worker revisits a fixed snapshot of indexed image links. It reads public HTML through the existing bounded page transport, extracting only the requested image and generation queries whose input ID matches. It does not discover new IDs, call source APIs, or fetch image bytes. Hidden generation data, unrelated users, model authors, comments, and recommended image metadata are excluded.
+
+Install `metadata-backfill.py`, `metadata-page.py`, `metadata-repair.php`, and the updated `reaction-backfill.py` together. The PHP helper requires the existing catalog and configured path to agree. It fills empty creator/prompt/model fields, appends observed LoRA/tag names, and fills missing reaction counts. FTS and classification changes commit with catalog metadata in one transaction. Existing source counts, image files, download state, and community votes are retained.
+
+Create a new private job directory for each snapshot as the application service account. Do not replace an existing job database. For example:
+
+```sh
+export CIVITAI_LIBRARY_CONFIG=/data/civitai/config/config.php
+python3 -B /www/wwwroot/search-civitai.xyz/metadata-backfill.py snapshot --job-dir /data/civitai/metadata-backfill/initial --catalog /data/civitai/database/catalog.sqlite --origin https://civitai.red
+python3 -B /www/wwwroot/search-civitai.xyz/metadata-backfill.py run --job-dir /data/civitai/metadata-backfill/initial --concurrency 8 --wave-wait 3 --transport curl --php /www/server/php/84/bin/php
+python3 -B /www/wwwroot/search-civitai.xyz/metadata-backfill.py status --job-dir /data/civitai/metadata-backfill/initial
+```
+
+The shared deployment runs `civitai-metadata-backfill.service` as `civitai-library`, with write access only to its job directory tree, catalog directory, private temporary files and logs. Output is appended to `/data/civitai/logs/metadata-backfill.log`. Stop the service to pause; starting it resumes the same snapshot. The job exits when its snapshot is exhausted. A later snapshot can include newly indexed incomplete images.
+
+Up to eight HTML requests run concurrently, followed by a three-second wave pause. Source robots rules, Retry-After, authentication/challenge cooldowns and four-attempt transient retry bounds apply. A successful page visit with omitted or explicitly empty resources is terminal for that snapshot, reported as partial or unavailable. Some images legitimately use no LoRAs. Status contains counts of pending/completed/failed images, fields initially wanted, fields observed/changed, and fields still missing among processed records. Private per-image observations and field audits remain in `job.sqlite`. No raw prompts or source HTML are printed to the operational log.

@@ -1,7 +1,7 @@
 // Collect and advance only image galleries chosen by the person. No focus changes.
 (() => {
   'use strict';
-  const VERSION = '2.8.12';
+  const VERSION = '2.8.13';
   if (location.protocol !== 'https:' || !['civitai.com', 'civitai.red'].includes(location.hostname)) return;
   if (window.__ISS_BROWSE_OBSERVER?.version === VERSION) return;
   window.__ISS_BROWSE_OBSERVER?.dispose?.();

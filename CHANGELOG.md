@@ -2,6 +2,14 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.13
+
+- Add a resumable server worker for missing creator, LoRA, model, prompt, tag and reaction metadata on existing images.
+- Visit up to eight public image pages concurrently, preserve source cooldowns, and record per-field progress and unresolved fields.
+- Preserve saved values and image files; update searchable metadata and classification atomically.
+- Treat source omissions and empty resource lists as terminal partial results for the current snapshot.
+- Preserve explicit LoRA versionName labels in future extension records.
+
 ## 2.8.12
 
 - Add Most Civitai reactions sorting, separate from community upvotes and Buzz.

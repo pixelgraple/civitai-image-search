@@ -406,7 +406,7 @@ def connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
     return db
 
 
-def open_state(job_dir: Path) -> sqlite3.Connection:
+def open_state(job_dir: Path, *, job_type: str | None = None) -> sqlite3.Connection:
     path = job_dir / "job.sqlite"
     if not path.is_file():
         raise ValueError("Job not found; create a snapshot first")
@@ -414,6 +414,9 @@ def open_state(job_dir: Path) -> sqlite3.Connection:
     if state.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] != SCHEMA_VERSION:
         state.close()
         raise ValueError("Unsupported reaction job schema")
+    if job_type is not None and meta(state, "job_type", "reactions") != job_type:
+        state.close()
+        raise ValueError("This snapshot belongs to a different backfill worker")
     return state
 
 
@@ -524,10 +527,11 @@ def failure_delay(error: FetchFailure, attempts: int) -> float:
     return max(error.retry_after, min(3600, minimum * (2 ** max(0, attempts - 1))))
 
 
-def process_item(item: dict, timeout: float, fetcher: Callable = fetch_page) -> dict:
+def process_item(item: dict, timeout: float, fetcher: Callable = fetch_page,
+                 parser: Callable = parse_reactions) -> dict:
     try:
         html = fetcher(item["page_url"], item["image_id"], timeout)
-        observed = parse_reactions(html, item["image_id"])
+        observed = parser(html, item["image_id"])
         return {"observed": observed, "error": None}
     except FetchFailure as error:
         return {"observed": {}, "error": error}
@@ -537,10 +541,13 @@ def process_item(item: dict, timeout: float, fetcher: Callable = fetch_page) -> 
 
 def run(job_dir: Path, *, concurrency: int = 8, wave_wait: float = 3, timeout: float = 25,
         max_attempts: int = 4, once: bool = False, fetcher: Callable = fetch_page,
-        robots_fetcher: Callable = fetch_robots, user_agent: str = USER_AGENT, emit: Callable = print) -> dict:
+        robots_fetcher: Callable = fetch_robots, user_agent: str = USER_AGENT, emit: Callable = print,
+        parser: Callable = parse_reactions, merger: Callable = merge_reactions,
+        status_reader: Callable = status, result_recorder: Callable | None = None,
+        job_type: str = "reactions", unavailable_message: str = "No explicit source reaction counts in page HTML") -> dict:
     if not 1 <= concurrency <= 8 or not 0 <= wave_wait <= 3600 or not 1 <= timeout <= 120 or not 1 <= max_attempts <= 10:
         raise ValueError("Invalid worker limits")
-    with process_lock(job_dir), open_state(job_dir) as state, ThreadPoolExecutor(max_workers=concurrency) as pool:
+    with process_lock(job_dir), open_state(job_dir, job_type=job_type) as state, ThreadPoolExecutor(max_workers=concurrency) as pool:
         catalog = Path(meta(state, "catalog"))
         if not catalog.is_file():
             raise ValueError("Catalog database disappeared")
@@ -565,7 +572,7 @@ def run(job_dir: Path, *, concurrency: int = 8, wave_wait: float = 3, timeout: f
                     set_meta(state, "last_status", str(error))
                     set_meta(state, "cooldown_until", time.time() + max(60, failure_delay(error, 1)))
                     state.commit()
-                    emit(json.dumps(status(job_dir), separators=(",", ":")))
+                    emit(json.dumps(status_reader(job_dir), separators=(",", ":")))
                     if once:
                         break
                     continue
@@ -597,16 +604,22 @@ def run(job_dir: Path, *, concurrency: int = 8, wave_wait: float = 3, timeout: f
                 state.execute("UPDATE items SET status='leased',attempts=?,lease_until=? WHERE image_id=?", (item["attempts"], now + timeout + 60, item["image_id"]))
             set_meta(state, "last_status", "visiting " + str(len(rows)) + " image pages")
             state.commit()
-            futures = {pool.submit(process_item, item, timeout, fetcher): item for item in rows}
+            futures = {pool.submit(process_item, item, timeout, fetcher, parser): item for item in rows}
             for future in as_completed(futures):
                 item = futures[future]
                 result = future.result()
                 error = result["error"]
                 next_attempt = 0
                 observed = result["observed"]
+                merge_result = None
                 if error is None:
                     try:
-                        outcome = merge_reactions(catalog, item["image_id"], observed)
+                        merge_result = merger(catalog, item["image_id"], observed)
+                        outcome = merge_result.get("outcome") if isinstance(merge_result, dict) else merge_result
+                        if outcome not in ("done", "partial", "unavailable", "removed", "skipped"):
+                            raise FetchFailure("Metadata merge returned an invalid outcome", retryable=False)
+                    except FetchFailure as merge_error:
+                        error = merge_error
                     except sqlite3.Error as db_error:
                         error = FetchFailure("Catalog update delayed: " + type(db_error).__name__)
                 if error is not None:
@@ -617,17 +630,19 @@ def run(job_dir: Path, *, concurrency: int = 8, wave_wait: float = 3, timeout: f
                     next_attempt = time.time() + delay if outcome == "retry" else 0
                     message = str(error)[:240]
                 else:
-                    message = "No explicit source reaction counts in page HTML" if outcome == "unavailable" else ""
+                    message = unavailable_message if outcome == "unavailable" else ""
                 state.execute("UPDATE items SET status=?,next_attempt=?,lease_until=0,last_error=?,observed_json=?,completed_at=? WHERE image_id=?", (outcome, next_attempt, message, json.dumps(observed, separators=(",", ":")), "" if outcome == "retry" else utc_now(), item["image_id"]))
+                if result_recorder is not None:
+                    result_recorder(state, item, observed, outcome, merge_result)
                 state.commit()
-            emit(json.dumps(status(job_dir), separators=(",", ":")))
+            emit(json.dumps(status_reader(job_dir), separators=(",", ":")))
             if once:
                 break
             STOP.wait(max(wave_wait, policy.delay))
         if STOP.is_set():
             set_meta(state, "last_status", "stopped; snapshot can resume")
             state.commit()
-    return status(job_dir)
+    return status_reader(job_dir)
 
 
 def main() -> int:

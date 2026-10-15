@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.12', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.13', ROOT_ID = '__iss_panel_root';
   if (window.__ISS_PANEL_VERSION === VERSION) { window.__ISS_TOGGLE_PANEL?.(); return; }
   window.__ISS_DISPOSE_PANEL?.();
   document.getElementById(ROOT_ID)?.remove();

@@ -30,8 +30,8 @@ function transportHarness({ connectFails = false } = {}) {
 }
 const speedProfile = multiplier => ({ multiplier, metadataConcurrency: Math.round(12 * multiplier), uploadBatchSize: 60, uploadIntervalMs: 3000, sourceIntervalMs: Math.round(1000 / multiplier), outstandingLimit: 600 });
 const speedConfig = multiplier => ({ speedMultiplier: multiplier, collectionSpeed: speedProfile(multiplier) });
-const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.12', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
-function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.12', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.13', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
+function libraryHarness({ config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.13', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], requests = [], intervals = [], intervalDelays = [];
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -56,7 +56,7 @@ function libraryHarness({ config = {}, failSave = false, failFetch = false, scan
   } });
   return { get, cloud, messages, requests, intervals, intervalDelays, transport };
 }
-function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.12', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+function panelHarness({ configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.13', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], events = {};
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };

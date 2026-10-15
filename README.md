@@ -4,7 +4,7 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.12](https://search-civitai.xyz/downloads/index-civitai-2.8.12.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.12)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.13](https://search-civitai.xyz/downloads/index-civitai-2.8.13.zip)** · **[Website guide](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.13)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Public browsing and contribution require no account or contributor key.
 
@@ -30,7 +30,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.12.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.13.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.
@@ -121,6 +121,14 @@ Dedicated **LoRA name** and **Creator username** fields match full names or name
 Choose **Most Civitai reactions** to rank captured likes, hearts, laughs and cries combined. Records with incomplete counts appear last. Buzz currency and this library's community votes are excluded. **Community upvotes** remains a separate sort.
 
 
+### Repair incomplete records
+
+The server can revisit a fixed snapshot of already indexed image links to recover missing creator usernames, model and LoRA names, prompts, source tags and reactions. The metadata worker reads public image-page HTML with **up to eight visits at a time** and a **three-second pause between groups**. It does not download image files or discover new image IDs.
+
+Existing values are preserved. Observed tags and LoRA labels are added, missing text and reaction fields are filled, and search/classification are updated together when needed. Progress, retries, per-field update counts and remaining gaps are stored in a private resumable job. Source cooldowns are honored. Missing or explicitly empty resources are recorded as a completed partial result, rather than retried indefinitely; not every image uses a LoRA or exposes its generation details.
+
+This repair runs on the server without requiring contributors to keep browser tabs open. Administrators can create another snapshot later to cover newly indexed incomplete records; it is not an unbounded crawl.
+
 ### Anime and Realistic are metadata groups
 
 Classifier v6 puts affirmative fantasy, anime, illustration, animation or digital-art cues in **Anime**. Otherwise it defaults to **Realistic**. Anime cues take precedence when photographic wording also appears. The rule reads positive prompts, tags, model names and LoRA names.
@@ -146,7 +154,8 @@ These are broad library sorting choices, **not visual image analysis or calibrat
 | `server/lib.php`, `server/schema.sql` | Catalog storage, validation and SQLite full-text search. |
 | `server/worker.php` | Image download queue, hashes, dimension checks and thumbnails. |
 | `server/style-classifier.php`, `server/reclassify.php` | Metadata grouping and existing-catalog reclassification. |
-| `server/reaction-backfill.py` | Resumable source-reaction repair for a fixed snapshot of known images. |
+| `server/reaction-backfill.py` | Resumable source-reaction repair and shared page transport. |
+| `server/metadata-backfill.py`, `metadata-page.py`, `metadata-repair.php` | Snapshot-based page metadata repair, exact-image extraction and atomic catalog/FTS updates. |
 | `server/tests/` | Isolated ingestion, storage, worker, classifier and reaction checks. |
 
 See **[the deployment guide](server/DEPLOY.md)** and **[example configuration](server/config.example.php)** for server requirements and operational details. Keep private configuration, the database and media outside the public document root. The shared deployment keeps application code under `/www/wwwroot/search-civitai.xyz` and runtime data under `/data/civitai/`.

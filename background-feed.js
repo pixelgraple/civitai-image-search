@@ -171,7 +171,7 @@ globalThis.ISSFeed = (() => {
     const loras = [...new Set(resources.filter(resource => {
       const type = String(resource?.type ?? resource?.modelType ?? '').toLowerCase();
       return type.includes('lora') || type.includes('locon') || type.includes('dora') || resource?.isLora === true;
-    }).flatMap(resource => [resource?.modelName, resource?.model?.name, resource?.name].map(promptText)).filter(Boolean))];
+    }).flatMap(resource => [resource?.modelName, resource?.model?.name, resource?.versionName, resource?.name].map(promptText)).filter(Boolean))];
     const url = typeof image?.url === 'string' ? image.url : '';
     let previewUrl = '';
     try {
