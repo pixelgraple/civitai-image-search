@@ -11,7 +11,7 @@ header('X-Frame-Options: DENY');
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Search the community Civitai image library by prompt, tags, model, LoRA, or creator, and sort by Civitai reactions.">
   <title>Search Civitai · Community image library</title>
-  <link rel="stylesheet" href="style.css?v=contributor-guide-v1">
+  <link rel="stylesheet" href="style.css?v=resource-search1">
   <link rel="stylesheet" href="access-gate.css?v=captcha1">
 </head>
 <body>
@@ -20,8 +20,8 @@ header('X-Frame-Options: DENY');
     <a class="brand" href="/" aria-label="Search Civitai home"><span>SEARCH<span class="brand-accent">CIVITAI</span></span><span class="brand-domain">XYZ</span></a>
     <form id="searchForm" class="search" role="search">
       <span class="search-kind" aria-hidden="true">Images</span>
-      <label class="sr-only" for="query">Search prompt text, tags, models, and LoRAs</label>
-      <input id="query" type="search" maxlength="300" autocomplete="off" placeholder="Search prompts, tags, models, LoRAs…">
+      <label id="queryLabel" class="sr-only" for="query">Search positive prompts and tags</label>
+      <input id="query" type="search" maxlength="300" autocomplete="off" placeholder="Search prompt words or tags…">
       <label class="sr-only" for="qMode">Combine search words</label><select id="qMode" class="query-mode" title="Choose whether every word or any word must match"><option value="all">All words (AND)</option><option value="any">Any word (OR)</option></select>
       <button class="search-submit" type="submit" aria-label="Search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path></svg></button>
     </form>
@@ -34,6 +34,16 @@ header('X-Frame-Options: DENY');
   <main>
     <div id="layoutPreview" class="layout-preview" hidden role="status"><span><b>Layout preview</b> <span id="previewDescription">48 repeated cards from one stored image. The library is unchanged.</span></span><a href="/">Exit preview ↗</a></div>
     <section class="catalog-controls" aria-label="Image search filters">
+      <section class="resource-search-bar" aria-labelledby="resourceSearchTitle">
+        <div class="resource-search-heading"><h1 id="resourceSearchTitle">Search within a model or LoRA</h1><p id="resourceSearchHelp">Match any part of a name, ignoring case. No % needed. Leave blank to search all models.</p></div>
+        <div class="resource-search-fields">
+          <div class="resource-field"><label for="model">Checkpoint / model</label><input id="model" type="search" maxlength="300" autocomplete="off" placeholder="Any part of a model name, e.g. Krea2" aria-describedby="resourceSearchHelp"></div>
+          <div class="resource-field"><label for="lora">LoRA</label><input id="lora" type="search" maxlength="200" autocomplete="off" placeholder="Any part of a LoRA name" aria-describedby="resourceSearchHelp"></div>
+          <div class="resource-field resource-tags"><label for="tag">Source tags <span>optional</span></label><div class="tag-input"><input id="tag" type="text" maxlength="1000" placeholder="beach, landscape" aria-describedby="tagHelp"><label class="sr-only" for="tagMode">Combine source tags</label><select id="tagMode"><option value="all">All tags (AND)</option><option value="any">Any tag (OR)</option></select></div></div>
+          <button id="searchWithin" class="apply-filters" type="button">Search images</button>
+        </div>
+        <div class="resource-search-notes"><p>Each filled field must match, together with your search words above.</p><p id="tagHelp">Separate up to 20 exact tags with commas. AND requires every tag; OR accepts any tag.</p></div>
+      </section>
       <div class="filterbar">
         <div id="counts" class="style-tabs" role="group" aria-label="Image style">
           <button type="button" class="style-tab is-active" data-category="" aria-pressed="true">All styles</button>
@@ -44,10 +54,8 @@ header('X-Frame-Options: DENY');
         <details id="filterPanel" class="filter-panel"><summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"></path></svg>Filters<span id="filterCount" class="filter-count" hidden></span></summary><div class="filter-popover">
           <div class="filter-panel-heading"><b>Find your next reference</b><span>Combine filters to narrow the library</span></div>
           <div class="filter-fields">
-            <div class="filter-field filter-field-wide"><label for="tag">Source tags</label><div class="tag-input"><input id="tag" type="text" maxlength="1000" placeholder="selfie, beach, sunglasses" aria-describedby="tagHelp"><label class="sr-only" for="tagMode">Combine source tags</label><select id="tagMode"><option value="all">All tags (AND)</option><option value="any">Any tag (OR)</option></select></div><p id="tagHelp">Separate up to 20 exact tags with commas. AND requires every tag; OR accepts any tag.</p></div>
-            <div class="filter-field"><label for="lora">LoRA name</label><input id="lora" type="search" maxlength="200" autocomplete="off" placeholder="Full name or part of a name" aria-describedby="metadataHelp"></div>
+            <div class="filter-field"><label for="qScope">Search words in</label><select id="qScope" aria-describedby="qScopeHelp"><option value="prompt_tags">Positive prompts + tags</option><option value="prompt">Positive prompts only</option><option value="all">All metadata</option></select><p id="qScopeHelp">All metadata also searches negative prompts, model names and LoRA names.</p></div>
             <div class="filter-field"><label for="creator">Creator username</label><input id="creator" type="search" maxlength="200" autocomplete="off" placeholder="Username or @username" aria-describedby="metadataHelp"></div>
-            <div class="filter-field filter-field-wide"><label for="model">Model name</label><input id="model" type="search" maxlength="300" autocomplete="off" placeholder="Full name or part of a name, e.g. Krea2 - DarkRealism" aria-describedby="metadataHelp"></div>
             <div class="filter-field filter-field-wide"><label for="category">Image style</label><select id="category"><option value="">All styles</option><option value="anime">Anime</option><option value="realistic">Realistic</option><option value="uncertain">Uncertain</option></select><p>Anime includes fantasy, illustration and animation cues. Other images are sorted as Realistic; Uncertain is retained for older records.</p></div>
           </div>
           <p id="metadataHelp" class="filter-source-note">Model, LoRA and creator searches match names captured from the source, ignoring case. Older images may be missing this metadata. Each filled filter must match.</p>
@@ -85,6 +93,6 @@ header('X-Frame-Options: DENY');
   <noscript><div class="access-noscript"><h1>JavaScript is needed to continue.</h1><p>Enable JavaScript and reload this page to complete verification and open the image library.</p><a href="/guide.php">Read the contributor guide</a></div></noscript>
   <script src="access-gate.js?v=captcha1" defer></script>
   <script src="gallery-images.js?v=cards1" defer></script>
-  <script src="app.js?v=stats2820" defer></script>
+  <script src="app.js?v=resource-search1" defer></script>
 </body>
 </html>

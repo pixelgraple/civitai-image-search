@@ -2,6 +2,13 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## Website — Search within models and LoRAs (2026-10-15)
+
+- Keep checkpoint/model, LoRA and source-tag fields visible above the gallery; partial names match anywhere, ignoring case.
+- Combine resource names with prompt/tag words and AND/OR tags, preserving the chosen constraints when clicking a quick topic, style or sort.
+- Default the website's keyword scope to positive prompts and tags. Offer positive-prompt-only and all-metadata scopes; API clients that omit the scope keep their previous behavior.
+- Accept model, LoRA and other search parameters in direct gallery links. Use the same constrained search for result counts and pagination. No extension reload is needed.
+
 ## 2.8.20 — Refresh Civitai stats
 
 - Add a stats-only gallery scan, using exact source IDs to update existing records without prompt reads or new image downloads. Preserve its mode and cursor across restart and resume.

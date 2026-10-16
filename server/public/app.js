@@ -14,8 +14,8 @@
   const reactionTypes = [['likeCount', '👍', 'likes'], ['heartCount', '❤️', 'hearts'], ['laughCount', '😂', 'laughs'], ['cryCount', '😭', 'cries'], ['buzzCount', '⚡', 'Buzz']];
   const communityTypes = [['upvote', '↑', 'Upvote'], ['heart', '❤️', 'Love'], ['laugh', '😂', 'Laugh'], ['wow', '😮', 'Wow']];
   const layoutPreview = new URL(location.href).searchParams.get('preview') === 'layout';
-  const defaultFilters = { q: '', qMode: 'all', tag: '', tagMode: 'all', tagMatch: 'list', model: '', lora: '', creator: '', creatorMatch: 'contains', category: '', sort: 'newest' };
-  const filterControls = { q: 'query', qMode: 'qMode', tag: 'tag', tagMode: 'tagMode', model: 'model', lora: 'lora', creator: 'creator', category: 'category', sort: 'sort' };
+  const defaultFilters = { q: '', qMode: 'all', qScope: 'prompt_tags', tag: '', tagMode: 'all', tagMatch: 'list', model: '', lora: '', creator: '', creatorMatch: 'contains', category: '', sort: 'newest' };
+  const filterControls = { q: 'query', qMode: 'qMode', qScope: 'qScope', tag: 'tag', tagMode: 'tagMode', model: 'model', lora: 'lora', creator: 'creator', category: 'category', sort: 'sort' };
   const state = { page: 1, pages: 1, limit: layoutPreview ? 48 : 42, total: 0, items: [], filters: { ...defaultFilters }, pendingFilters: null, request: 0, controller: null, viewerIndex: -1, viewerBusy: false, returnFocus: null, reactionRequest: 0, reactionController: null, community: null };
   const reactionWrites = new Map();
 
@@ -107,6 +107,7 @@
     const creator = $('creator').value.trim().replace(/^@+/, '');
     return {
       q: $('query').value.trim(), qMode: $('qMode').value === 'any' ? 'any' : 'all',
+      qScope: ['prompt', 'all'].includes($('qScope').value) ? $('qScope').value : 'prompt_tags',
       tag: exactTag ? tag : tag.split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean).join(', '),
       tagMatch: exactTag ? 'exact' : 'list',
       model: $('model').value.trim(),
@@ -120,6 +121,12 @@
     $('tag').dataset.exactTag = filters.tagMatch === 'exact' ? filters.tag : '';
     $('creator').dataset.exactCreator = filters.creatorMatch === 'exact' ? filters.creator : '';
     syncTagHelp();
+    syncQueryScope();
+  }
+  function syncQueryScope() {
+    const scope = $('qScope').value;
+    $('query').placeholder = scope === 'all' ? 'Search all metadata…' : scope === 'prompt' ? 'Search positive prompt words…' : 'Search prompt words or tags…';
+    $('queryLabel').textContent = scope === 'all' ? 'Search all indexed metadata' : scope === 'prompt' ? 'Search positive prompts' : 'Search positive prompts and tags';
   }
   function syncTagHelp() {
     $('tagHelp').textContent = $('tag').dataset.exactTag
@@ -142,7 +149,7 @@
     });
     const filters = state.filters;
     const summaries = [
-      ['q', filters.q ? `${filters.qMode === 'any' ? 'OR' : 'AND'} words: ${filters.q}` : ''],
+      ['q', filters.q ? `${filters.qScope === 'all' ? 'Metadata' : filters.qScope === 'prompt' ? 'Prompt' : 'Prompt/tag'} ${filters.qMode === 'any' ? 'OR' : 'AND'}: ${filters.q}` : ''],
       ['tag', filters.tag ? `${filters.tagMatch === 'exact' ? 'Tag' : filters.tagMode === 'any' ? 'OR tags' : 'AND tags'}: ${filters.tag}` : ''],
       ['lora', filters.lora ? `LoRA: ${filters.lora}` : ''],
       ['model', filters.model ? `Model: ${filters.model}` : ''],
@@ -395,7 +402,8 @@
   function applyFilters() { $('filterPanel').open = false; search(); }
   function clearFilters() { setControls(defaultFilters); applyFilters(); }
   function searchRelated(key, value) {
-    setControls({ ...(state.pendingFilters || state.filters), [key]: value });
+    // Keep typed model/LoRA constraints when a topic, style or sort is clicked.
+    setControls({ ...currentFilters(), [key]: value });
     applyFilters();
   }
   function searchAllBy(key, value) {
@@ -421,6 +429,8 @@
   }
   $('searchForm').addEventListener('submit', event => { event.preventDefault(); search(); });
   $('applyFilters').addEventListener('click', applyFilters);
+  $('searchWithin').addEventListener('click', applyFilters);
+  $('qScope').addEventListener('change', syncQueryScope);
   $('tag').addEventListener('input', () => { delete $('tag').dataset.exactTag; syncTagHelp(); });
   $('creator').addEventListener('input', () => { delete $('creator').dataset.exactCreator; });
   ['tag', 'model', 'lora', 'creator'].forEach(id => $(id).addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); applyFilters(); } }));
@@ -479,10 +489,16 @@
   const params = new URL(location.href).searchParams;
   const creator = String(params.get('creator') || '').trim().replace(/^@+/, '');
   const initialFilters = { ...defaultFilters };
+  for (const [key, max] of Object.entries({ q: 300, model: 300, lora: 200, tag: 1000 })) {
+    const value = String(params.get(key) || '').trim();
+    if ([...value].length <= max && !value.includes('\0')) initialFilters[key] = value;
+  }
+  for (const [key, choices] of Object.entries({ qMode: ['all', 'any'], qScope: ['prompt_tags', 'prompt', 'all'], tagMode: ['all', 'any'], tagMatch: ['list', 'exact'], category: ['', 'anime', 'realistic', 'uncertain'], sort: ['newest', 'upvotes', 'civitai_reactions'] })) {
+    if (choices.includes(params.get(key))) initialFilters[key] = params.get(key);
+  }
   if (creator && [...creator].length <= 200 && !creator.includes('\0')) {
     initialFilters.creator = creator;
     initialFilters.creatorMatch = params.get('creatorMatch') === 'exact' ? 'exact' : 'contains';
-    if (['newest', 'upvotes', 'civitai_reactions'].includes(params.get('sort'))) initialFilters.sort = params.get('sort');
   }
   setControls(initialFilters);
   function loadUnlockedLibrary() {

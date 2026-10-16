@@ -123,6 +123,7 @@ try {
         $model=search_parameter('model','',300);
         $category=search_parameter('category','',20); $sort=search_parameter('sort','newest',30);
         $qMode=search_parameter('qMode','all',3); $tagMode=search_parameter('tagMode','all',3);
+        $qScope=search_parameter('qScope','all',11);
         $tagMatch=search_parameter('tagMatch','list',5);
         $pageText=search_parameter('page','1',6); $limitText=search_parameter('limit','24',3);
         if (!ctype_digit($pageText) || !ctype_digit($limitText)) json_response(['ok'=>false,'error'=>'Page and limit must be positive numbers.'],400);
@@ -130,6 +131,7 @@ try {
         if (!in_array($sort, ['newest','upvotes','civitai_reactions'], true)) json_response(['ok'=>false,'error'=>'Invalid sort order.'], 400);
         if (!in_array($category, ['', 'anime', 'realistic', 'uncertain'], true)) json_response(['ok'=>false,'error'=>'Invalid category.'], 400);
         if (!in_array($qMode,['all','any'],true) || !in_array($tagMode,['all','any'],true)) json_response(['ok'=>false,'error'=>'Use all or any for keyword and tag matching.'],400);
+        if (!in_array($qScope,['all','prompt','prompt_tags'],true)) json_response(['ok'=>false,'error'=>'Use all, prompt or prompt_tags for keyword scope.'],400);
         if (!in_array($tagMatch,['list','exact'],true)) json_response(['ok'=>false,'error'=>'Use list or exact for tag input.'],400);
         if (!in_array($creatorMatch,['contains','exact'],true)) json_response(['ok'=>false,'error'=>'Use contains or exact for creator matching.'],400);
         $terms = preg_split('/[^\p{L}\p{N}]+/u', lower_text($q), -1, PREG_SPLIT_NO_EMPTY) ?: [];
@@ -140,6 +142,10 @@ try {
         $where = ['NOT EXISTS (SELECT 1 FROM image_collection_skips sk WHERE sk.image_id=i.image_id)']; $args = [];
         if ($terms) {
             $fts = implode($qMode==='any' ? ' OR ' : ' AND ',array_map(static fn($term)=>'"'.str_replace('"','""',$term).'"*',$terms));
+            // Scope the entire AND/OR expression; resource filters remain separate
+            // requirements. Only allowlisted FTS column names are interpolated.
+            if ($qScope==='prompt') $fts='prompt : ('.$fts.')';
+            elseif ($qScope==='prompt_tags') $fts='{prompt tags} : ('.$fts.')';
             $where[] = 'i.image_id IN (SELECT image_id FROM images_fts WHERE images_fts MATCH ?)'; $args[]=$fts;
         }
         if ($tags) {
@@ -182,7 +188,7 @@ try {
         $stmt->bindValue(count($args)+1,$limit,PDO::PARAM_INT); $stmt->bindValue(count($args)+2,$offset,PDO::PARAM_INT); $stmt->execute();
         $items = array_map('public_image_row',$stmt->fetchAll());
         header(sprintf('Server-Timing: database;dur=%.1f, search_count;dur=%.1f, search_page;dur=%.1f',1000*($databaseReady-$searchStarted),1000*($countFinished-$databaseReady),1000*(microtime(true)-$countFinished)));
-        json_response(['ok'=>true,'items'=>$items,'total'=>$total,'page'=>$page,'limit'=>$limit,'pages'=>(int)ceil($total/$limit),'categoryCounts'=>$counts,'sort'=>$sort,'qMode'=>$qMode,'tagMode'=>$tagMode,'creatorMatch'=>$creatorMatch]);
+        json_response(['ok'=>true,'items'=>$items,'total'=>$total,'page'=>$page,'limit'=>$limit,'pages'=>(int)ceil($total/$limit),'categoryCounts'=>$counts,'sort'=>$sort,'qMode'=>$qMode,'qScope'=>$qScope,'tagMode'=>$tagMode,'creatorMatch'=>$creatorMatch]);
     }
     if ($action === 'images' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         authenticate_writer();
