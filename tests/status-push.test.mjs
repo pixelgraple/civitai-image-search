@@ -74,7 +74,7 @@ test('background handshake is hardcoded in every status response and Start trigg
   h.context.nextFeed = async () => { reads++; return { items: [], catalogItems: [], cursor: null, done: false }; };
   for (const type of ['getState', 'getConfig', 'getSourceStatus', 'civitai-auto-status']) {
     const response = await h.message({ type });
-    assert.equal(response.backgroundVersion, '2.8.19'); assert.equal(response.statusProtocol, 1);
+    assert.equal(response.backgroundVersion, '2.8.20'); assert.equal(response.statusProtocol, 1);
   }
   assert.equal((await start(h)).ok, true);
   await until(() => reads === 1, 'Start should not wait for an alarm or offscreen heartbeat');
@@ -88,7 +88,7 @@ test('live initial snapshots are complete, bounded, private, and scoped to the s
   const own = port(h, t, sender(h)), global = port(h, t);
   await until(() => own.messages.length && global.messages.length);
   const message = own.messages.at(-1), aggregate = global.messages.at(-1);
-  assert.equal(message.type, 'index-civitai-status'); assert.equal(message.backgroundVersion, '2.8.19'); assert.equal(message.statusProtocol, 1);
+  assert.equal(message.type, 'index-civitai-status'); assert.equal(message.backgroundVersion, '2.8.20'); assert.equal(message.statusProtocol, 1);
   for (const field of ['state', 'browse', 'source', 'config']) assert.equal(typeof message[field], 'object');
   assert.equal(message.state.sessionTabId, 7); assert.equal(message.state.status.catalogSynced, 1); assert.equal(message.state.runs, undefined);
   assert.equal(aggregate.state.activeTabs, 2); assert.equal(aggregate.state.status.catalogSynced, 3);

@@ -103,11 +103,11 @@ globalThis.ISSFeed = (() => {
   }
   function imageReactions(...statsSources) {
     const aliases = {
-      likeCount: ['likeCount', 'likeCountAllTime'],
-      heartCount: ['heartCount', 'heartCountAllTime'],
-      laughCount: ['laughCount', 'laughCountAllTime'],
-      cryCount: ['cryCount', 'cryCountAllTime'],
-      buzzCount: ['buzzCount', 'buzzCountAllTime', 'tippedAmountCountAllTime']
+      likeCount: ['likeCountAllTime', 'likeCount'],
+      heartCount: ['heartCountAllTime', 'heartCount'],
+      laughCount: ['laughCountAllTime', 'laughCount'],
+      cryCount: ['cryCountAllTime', 'cryCount'],
+      buzzCount: ['buzzCountAllTime', 'buzzCount', 'tippedAmountCountAllTime']
     };
     const reactions = {};
     for (const stats of statsSources) {
@@ -130,6 +130,8 @@ globalThis.ISSFeed = (() => {
   }
   const hasCoreReactions = value => ['likeCount', 'heartCount', 'laughCount', 'cryCount']
     .every(key => Number.isSafeInteger(value?.[key]) && value[key] >= 0);
+  const needsReactionRefresh = value => !hasCoreReactions(value) ||
+    ['likeCount', 'heartCount', 'laughCount', 'cryCount'].every(key => value[key] === 0);
   async function civitaiPageReactions(feed, id, siteRequest, observeCreator) {
     const url = new URL(`/images/${encodeURIComponent(id)}`, feed.pageUrl);
     let result;
@@ -250,7 +252,7 @@ globalThis.ISSFeed = (() => {
             try {
               // One post may exceed 600 images. Admission waits for durable
               // accepted work to free capacity without truncating the page.
-              if (imageExceedsLimits(initial)) {
+              if (!feed.statsOnly && imageExceedsLimits(initial)) {
                 records[index] = null; completed++;
                 await onProgress({ phase: 'metadata-oversize', id: initial.id, completed, total: pending.length });
                 return;
@@ -273,7 +275,7 @@ globalThis.ISSFeed = (() => {
                   await onProgress({ phase: 'metadata-oversize', id: initial.id, completed, total: pending.length });
                   return null;
                 }
-                if (record?.prompt && readReactions && !hasCoreReactions(record.reactions))
+                if (record?.prompt && readReactions && needsReactionRefresh(record.reactions))
                   record.reactions = { ...record.reactions, ...await readReactions(record.id) };
                 return record;
               });
@@ -315,5 +317,5 @@ globalThis.ISSFeed = (() => {
     return { items, catalogItems, cursor, done, count: data.items.length };
   }
   return { fromRequests, next: trpc, decode,
-    civitaiMetadata, civitaiCatalogRecord, civitaiPageReactions, imageReactions, imageCreator, hasCoreReactions, imageExceedsLimits, imagePageUrl };
+    civitaiMetadata, civitaiCatalogRecord, civitaiPageReactions, imageReactions, imageCreator, hasCoreReactions, needsReactionRefresh, imageExceedsLimits, imagePageUrl };
 })();

@@ -58,13 +58,13 @@ test('reaction-only observations are allowed during a manual feed and never crea
   assert.equal((await h.collector.status()).pending, 0); assert.equal(h.calls.length, 0);
 });
 
-test('passive collection durably defers image pages only when core reaction counts are missing', async () => {
+test('passive collection rechecks missing and all-zero source reactions', async () => {
   for (const complete of [false, true]) {
     const pages = [], stats = complete ? { likeCount: 0, heartCount: 0, laughCount: 0, cryCount: 0 } : {};
     const h = harness({}, { record: image => ({ id: String(image.id), prompt: 'landscape', downloadUrl: image.url, reactions: stats }),
       deferReactions: async entry => { pages.push(entry.card.id); } });
     await h.message(); await h.collector.pulse();
-    assert.equal(pages.length, complete ? 0 : 1); assert.equal(h.uploads[0].records[0].reactions.likeCount, complete ? 0 : undefined);
+    assert.equal(pages.length, 1); assert.equal(h.uploads[0].records[0].reactions.likeCount, complete ? 0 : undefined);
   }
 });
 

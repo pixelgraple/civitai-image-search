@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.19', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.20', ROOT_ID = '__iss_panel_root';
   const previousRoot = document.getElementById(ROOT_ID);
   if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
     try { window.__ISS_TOGGLE_PANEL(); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
@@ -36,6 +36,8 @@
       </section>
       <main id="overview"><p class="state"><i id="dot" class="dot"></i><span id="runState">Ready to index</span></p><div class="stats"><div class="stat"><b id="synced">0</b><span>Accepted</span></div><div class="stat"><b id="stored">0</b><span>Copies skipped</span></div><div class="stat"><b id="promptless">0</b><span>No prompt</span></div></div><div class="source-card"><span class="mini-title">Source activity · all tabs</span><p id="sourceStatus" class="hint" role="status"></p></div><p id="queueStatus" class="hint" role="status"></p><p id="sharedQueueStatus" class="hint queue-summary" role="status"></p><p id="status" class="status" role="status" aria-live="polite"></p><p id="sourceNotice" class="hint" role="status"></p><div id="browse" class="browse">Checking collection…</div><details><summary>Queue &amp; transfer details</summary><div class="detail-content"><p id="pipelineStats" class="hint" role="status"></p><p id="activity" class="hint" role="status"></p><p id="downloadActivity" class="hint" role="status"></p><p id="connectionStatus" class="hint" role="status"></p><p class="hint">Tab totals combine automatic collection and feed scans. Only images with a positive prompt are indexed. Files are saved on the server.</p></div></details></main>
       <div class="actions"><button id="start" class="primary">Scan this tab</button><button id="resume" hidden>Resume tab</button><button id="stop" disabled>Stop tab</button></div>
+      <div class="actions"><button id="refreshStats" title="Revisit this gallery and update existing images without downloading files or reading prompts">Refresh Civitai stats only</button></div>
+      <p id="reactionStatus" class="hint" role="status" aria-live="polite" style="padding:0 16px 12px">Every scan refreshes known image reactions. Stats-only mode updates existing records without downloading images.</p>
       <div class="links"><a href="https://search-civitai.xyz/" target="_blank" rel="noopener noreferrer">Shared library ↗</a><button id="settings">Browsing &amp; activity</button></div>
     </section>`;
   document.documentElement.appendChild(root);
@@ -138,6 +140,11 @@
     $('dot').classList.toggle('on', busy || autoRunning);
     $('runState').textContent = starting ? 'Starting this tab’s feed…' : s.running ? 'Scanning this tab’s feed' : browse?.tabPaused ? 'This tab is paused' : complete ? `This tab’s feed finished${autoRunning ? ' · auto collection on' : ''}` : autoRunning ? 'Collecting visible images' : s.stopped ? 'This tab’s scan stopped' : 'Ready to index';
     $('start').disabled = busy; $('start').textContent = starting ? 'Connecting…' : s.running ? 'Scanning…' : 'Scan this tab';
+    $('refreshStats').disabled = busy || (workerChecked && !compatible());
+    const stats = browse?.sourceReactions;
+    $('reactionStatus').textContent = (state?.settings?.statsOnly ? `Stats-only scan: ${count(s.processed)} checked on this tab · ${count(s.statsUnavailable)} unavailable. ` : 'Every scan refreshes existing Civitai reactions. ') +
+      (stats ? `Stats updates · all tabs since reload: ${count(stats.updated)} matched · ${count(stats.changed)} changed · ${count(stats.notInLibrary)} not in library · ${count(stats.queued)} queued${stats.busy ? ' · sending' : ''}.${stats.lastError ? ` ${stats.lastError}` : ''}${stats.retryAt > Date.now() ? ` Retry in ${count(Math.ceil((stats.retryAt - Date.now()) / 1000))}s.` : ''}` : 'Stats-only mode updates existing records without downloading images.');
+    $('reactionStatus').classList.toggle('error', !!stats?.lastError);
     $('stop').disabled = !busy && !autoRunning; $('resume').hidden = (!state?.canResume && !browse?.tabPaused) || busy; $('resume').disabled = busy;
     $('status').textContent = message || s.lastError || browse?.lastError || (s.running ? `Feed page ${count(state?.feed?.pages || s.driverBatch || 1)} · ${state?.driver?.phase || s.driverPhase || 'indexing prompts'}` : browse?.tabPaused ? 'Collection is stopped for this tab. Resume tab to continue.' : complete ? `This tab’s feed reached the end.${autoRunning ? ' Automatic collection stays on for new gallery images.' : ' Scan this tab to start again.'}` : autoRunning ? 'Visible images are collected as you browse. Choose Scan this tab to scroll this gallery automatically. Other tabs keep manual scrolling.' : state?.canResume ? 'This tab’s feed is paused. Resume its saved position, or start a fresh scan here.' : s.stopped ? 'This tab’s scan stopped. Start a fresh scan from the selected page.' : 'Scan this page’s selected feed. You can run other Civitai tabs at the same time. Keep each source tab open.');
     $('status').classList.toggle('error', messageError || !!s.lastError || !!browse?.lastError);
@@ -214,7 +221,7 @@
     }
     finally { refreshing = false; }
   }
-  async function begin(resume = false) {
+  async function begin(resume = false, statsOnly = false) {
     if (workerChecked && !compatible()) { message = updateWarning(); messageError = true; render(); return; }
     if (starting || state?.status?.running) return;
     if (!/^https:\/\/civitai\.(?:com|red)\//.test(location.href)) { message = 'Open a civitai.com or civitai.red page to scan.'; messageError = true; render(); return; }
@@ -232,7 +239,7 @@
       if (location.href !== pageUrl) throw new Error('This tab changed page. Start again from the page you want to scan.');
       if (!resume && !feedRequestUrls?.length) throw new Error('Civitai has not loaded this tab’s image feed. Wait for its images to load, then scan again. Other tabs keep their own scans.');
       message = ''; render();
-      const result = await send({ type: resume ? 'resume' : 'start', backgroundDriver: true, settings: { pageUrl }, feedRequestUrls });
+      const result = await send({ type: resume ? 'resume' : 'start', backgroundDriver: true, settings: { pageUrl, statsOnly }, feedRequestUrls });
       if (epoch !== startEpoch || disposed) return;
       if (!result.ok) throw new Error(result.error || 'Could not start the feed scan.');
     } catch (error) {
@@ -247,6 +254,7 @@
     if (state?.canResume) return begin(true);
     const result = await send({ type: 'civitai-auto-resume-tab' }); message = result.ok ? '' : result.error || 'Could not resume this tab.'; messageError = !result.ok; await refresh();
   }; $('stop').onclick = stop;
+  $('refreshStats').onclick = () => begin(false, true);
   $('settings').onclick = async () => { const result = await send({ type: 'openPromptLibrary' }); if (!result.ok) { message = result.error || 'Could not open browsing settings.'; messageError = true; render(); } };
   $('close').onclick = () => { root.style.display = 'none'; };
   const visible = () => { if (!document.hidden) refresh(); };

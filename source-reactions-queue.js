@@ -22,7 +22,8 @@ globalThis.ISSSourceReactions = (() => {
   function create({ post, load = async () => null, save = async () => {}, changed = () => {}, error = () => {},
     cooldownUntil = () => 0, setTimer = setTimeout, clearTimer = clearTimeout, now = () => Date.now() }) {
     const pending = new Map(), sent = new Map();
-    let timer = null, busy = false, retryAt = 0, updated = 0, persistChain = Promise.resolve();
+    let timer = null, busy = false, retryAt = 0, updated = 0, changedRecords = 0, notInLibrary = 0, lastError = '', persistChain = Promise.resolve();
+    const live = new Map();
     const persist = () => {
       const snapshot = { version: 1, retryAt, pending: [...pending.values()].map(item => ({ ...item, reactions: { ...item.reactions } })) };
       persistChain = persistChain.catch(() => {}).then(() => save(snapshot)).catch(error); changed();
@@ -58,13 +59,22 @@ globalThis.ISSSourceReactions = (() => {
       const items = Array.isArray(saved) ? saved : Array.isArray(saved?.pending) ? saved.pending : [];
       for (const item of items.slice(-600)) {
         accept(item.id, item.reactions, Number(item.attempts) || 0, item.creatorName, item.capturedPageUrl);
-        if (pending.has(String(item.id))) pending.get(String(item.id)).retainMissing = item.retainMissing === true;
+        if (pending.has(String(item.id))) Object.assign(pending.get(String(item.id)), { retainMissing: item.retainMissing === true, dropMissing: item.dropMissing === true });
       }
       schedule();
     })();
-    async function observe(id, reactions, { retainMissing = false, creatorName: observedCreator = '', capturedPageUrl: observedPage = '' } = {}) {
+    async function observe(id, reactions, { retainMissing = false, dropMissing = false, force = false, liveDom = false, creatorName: observedCreator = '', capturedPageUrl: observedPage = '' } = {}) {
       await initialized;
       id = String(id);
+      // A freshly hydrated card is newer than the feed/SSR snapshot. Protect
+      // its exact fields briefly, while still accepting real count decreases.
+      reactions = normalize(reactions);
+      if (liveDom && Object.keys(reactions).length) {
+        live.delete(id); live.set(id, { reactions, at: now() });
+        while (live.size > 5000) live.delete(live.keys().next().value);
+      } else if (live.has(id) && now() - live.get(id).at < 60000)
+        reactions = { ...reactions, ...live.get(id).reactions };
+      if (force) sent.delete(id);
       const values = normalize(reactions), prior = sent.get(id); observedCreator = creatorName(observedCreator);
       observedPage = capturedPageUrl(id, observedPage);
       if (!pending.has(id) && pending.size >= 600 && (Object.keys(values).length || observedCreator || observedPage) &&
@@ -72,8 +82,10 @@ globalThis.ISSSourceReactions = (() => {
             (!observedPage || prior.capturedPageUrl) &&
             Object.entries(values).every(([key, value]) => prior.reactions[key] === value)))
         throw Object.assign(new Error('The source reaction update queue is full; enrichment will retry.'), { status: 503, retryAfterMs: 3000 });
+      const previousPending = pending.get(id);
       const accepted = accept(id, reactions, 0, observedCreator, observedPage);
       if (retainMissing && pending.has(id)) pending.get(id).retainMissing = true;
+      if (pending.has(id)) pending.get(id).dropMissing = dropMissing && !pending.get(id).retainMissing && (!previousPending || previousPending.dropMissing === true);
       if (!accepted && !(retainMissing && pending.has(id))) return;
       await persist(); schedule();
     }
@@ -96,7 +108,7 @@ globalThis.ISSSourceReactions = (() => {
           if (missing.has(item.id)) {
             // A DOM count may arrive before that image's prompt insert. Retry
             // briefly, without ever creating a promptless catalog record.
-            if (current) { current.attempts++; if (current.attempts >= 10 && !current.retainMissing) pending.delete(item.id); }
+            if (current) { current.attempts++; if (current.dropMissing || (current.attempts >= 10 && !current.retainMissing)) { pending.delete(item.id); notInLibrary++; } }
             continue;
           }
           const previous = sent.get(item.id);
@@ -105,15 +117,17 @@ globalThis.ISSSourceReactions = (() => {
           if (current && itemSignature(current) === itemSignature(item)) pending.delete(item.id);
         }
         while (sent.size > 5000) sent.delete(sent.keys().next().value);
-        retryAt = missing.size ? now() + 15000 : 0;
+        changedRecords += Number(result.updated) || 0; lastError = '';
+        retryAt = [...missing].some(id => pending.has(id)) ? now() + 15000 : 0;
       } catch (cause) {
+        lastError = String(cause?.message || cause);
         retryAt = now() + Math.max(30000, Number(cause?.retryAfterMs) || 0, cause?.status === 429 ? 60000 : 0);
         error(cause);
       } finally { busy = false; await persist(); schedule(); }
     }
     return { initialized, observe, flush,
       discard: async id => { await initialized; pending.delete(String(id)); await persist(); },
-      snapshot: () => ({ queued: pending.size, busy, updated }),
+      snapshot: () => ({ queued: pending.size, busy, updated, changed: changedRecords, notInLibrary, retryAt, lastError }),
       wake: () => { if (timer !== null) { clearTimer(timer); timer = null; } schedule(); } };
   }
   return Object.freeze({ create, normalize, signature, creatorName, capturedPageUrl });

@@ -5,7 +5,7 @@ importScripts('state-checkpoint.js', 'collection-speed.js', 'download-settings.j
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.19', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.20', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -42,8 +42,8 @@ const sourceReactionUpdates = ISSSourceReactions.create({
   cooldownUntil: () => uploadCooldownUntil, changed: notifyStatusChanged,
   error: error => addDebug('source-reactions', String(error?.message || error))
 });
-const observeSourceReactions = (id, reactions, creatorName = '', capturedPageUrl = '') => sourceReactionUpdates.observe(id, reactions,
-  { creatorName, capturedPageUrl: ISSFeed.imagePageUrl(id, capturedPageUrl) }).catch(error => addDebug('source-reactions', error.message));
+const observeSourceReactions = (id, reactions, creatorName = '', capturedPageUrl = '', options = {}) => sourceReactionUpdates.observe(id, reactions,
+  { creatorName, capturedPageUrl: ISSFeed.imagePageUrl(id, capturedPageUrl), ...options });
 const reactionPages = ISSReactionPages.create({
   load: () => readStorage('civitaiReactionPagesV1'), save: value => writeStorage('civitaiReactionPagesV1', value),
   observe: (id, reactions, capturedPageUrl) => sourceReactionUpdates.observe(id, reactions,
@@ -103,7 +103,7 @@ function freshState(settings = {}) {
     catalogStoredSkippedIds: [], catalogPromptlessSkippedIds: [], catalogOversizeSkippedIds: [], feed: settings.feed || null,
     sessionTabId: Number.isInteger(settings.sessionTabId) ? settings.sessionTabId : null,
     settings: { siteMode: 'civitai', serverCopies: true, backgroundMode: true,
-      autoScroll: true, pageUrl: String(settings.pageUrl || '') },
+      autoScroll: true, statsOnly: settings.statsOnly === true, pageUrl: String(settings.pageUrl || '') },
     status: { found: 0, catalogIndexed: 0, catalogSynced: 0, catalogStoredSkipped: 0,
       catalogPromptlessSkipped: 0, catalogOversizeSkipped: 0, downloaded: 0, downloadedBytes: 0,
       processed: 0, submitted: 0, pending: 0, phase: 'idle', lastActivityAt: 0, retryAt: 0,
@@ -330,7 +330,7 @@ async function restoreAll() {
   for (const prior of candidates.slice(-100)) {
     const pageUrl = String(prior.settings?.pageUrl || ''), tabId = prior.sessionTabId;
     if (!Number.isInteger(tabId) || !ISSBrowseCollector.page(pageUrl) || sessions.has(tabId)) continue;
-    const run = freshState({ pageUrl, sessionTabId: tabId }), driver = newDriver();
+    const run = freshState({ pageUrl, sessionTabId: tabId, statsOnly: prior.settings?.statsOnly === true }), driver = newDriver();
     for (const key of ['catalogIds', 'catalogSyncedIds', 'catalogStoredSkippedIds', 'catalogPromptlessSkippedIds', 'catalogOversizeSkippedIds', 'catalogProcessedIds', 'catalogDiscoveredIds', 'outstandingIds']) {
       run[key] = [...new Set((Array.isArray(prior[key]) ? prior[key] : []).map(String)
         .filter(id => /^[1-9]\d{0,19}$/.test(id) && Number.isSafeInteger(Number(id))))];
@@ -449,7 +449,8 @@ async function startSession(message, sender, resume = false) {
   if (resume && (sessions.get(previous.sessionTabId) !== previous || previous.status.running)) {
     throw new Error('This saved feed was already resumed in another tab.');
   }
-  const run = resume ? { ...previous, feed, sessionTabId: tabId } : freshState({ pageUrl, sessionTabId: tabId, feed });
+  const run = resume ? { ...previous, feed, sessionTabId: tabId } : freshState({ pageUrl, sessionTabId: tabId, feed, statsOnly: message.settings?.statsOnly === true });
+  feed.statsOnly = run.settings.statsOnly === true;
   run.orphaned = false;
   // Clone mutable status so a response from the old paused run cannot change this run.
   run.status = { ...run.status, running: true, scanning: true, stopped: false, stopReason: '', lastError: '' };
@@ -496,6 +497,7 @@ async function backgroundFeedPulse(tabId) {
         if (progress.phase === 'metadata' && Array.isArray(progress.ids)) {
           const ids = progress.ids.map(String);
           run.catalogDiscoveredIds = [...new Set([...run.catalogDiscoveredIds, ...ids])];
+          if (run.settings.statsOnly) { await persistState(run); return; }
           for (const id of ids) if (!run.catalogSyncedIds.includes(id) && !run.catalogOversizeSkippedIds.includes(id) && reserveOutstanding(id, 'manual', tabId))
             run.outstandingIds = [...new Set([...run.outstandingIds, id])];
           await persistState(run);
@@ -503,15 +505,42 @@ async function backgroundFeedPulse(tabId) {
         }
         if (progress.phase === 'metadata-admit') {
           const id = String(progress.id);
-          if (run.catalogSyncedIds.includes(id)) { observeSourceReactions(id, progress.reactions, progress.creatorName, run.settings.pageUrl); return { skip: true }; }
+          if (run.settings.statsOnly) {
+            if (run.catalogProcessedIds.includes(id)) return { skip: true };
+            // Existing-record updates only: no duplicate file inspection,
+            // prompt requests, ingest, or image downloads in this mode.
+            let reactions = progress.reactions;
+            if (ISSFeed.needsReactionRefresh(reactions)) {
+              const exact = await ISSFeed.civitaiPageReactions({ pageUrl: run.settings.pageUrl }, id,
+                url => requestCivitaiFeed(tabId, url, run.settings.pageUrl, current));
+              const allZero = ISSFeed.hasCoreReactions(reactions) && Object.values(reactions).every(value => value === 0);
+              reactions = { ...(allZero ? {} : reactions), ...exact };
+            }
+            if (!current()) return { skip: true };
+            if (Object.keys(reactions || {}).length)
+              await observeSourceReactions(id, reactions, '', run.settings.pageUrl, { dropMissing: true, force: true });
+            else run.status.statsUnavailable = (run.status.statsUnavailable || 0) + 1;
+            run.catalogProcessedIds = [...new Set([...run.catalogProcessedIds, id])];
+            run.status.phase = currentDriver.phase = 'refreshing Civitai stats';
+            run.status.lastActivityAt = Date.now(); await persistState(run);
+            return { skip: true };
+          }
+          if (run.catalogSyncedIds.includes(id)) {
+            await observeSourceReactions(id, progress.reactions, progress.creatorName, run.settings.pageUrl);
+            if (ISSFeed.needsReactionRefresh(progress.reactions)) await deferReactionPage(id, tabId, run.settings.pageUrl);
+            return { skip: true };
+          }
           if (run.catalogPromptlessSkippedIds.includes(id) || run.catalogOversizeSkippedIds.includes(id)) return { skip: true };
           await admitManualImage(id, run, current);
           markOutstanding(id, 'manual', tabId, 'waitingDuplicateCheck');
           const stored = await checkQueuedCatalogImage(id, current);
           if (!current()) throw Object.assign(new Error('Collection was paused.'), { status: 409 });
           if (stored.exists) {
-            if (stored.downloadStatus !== 'skipped') observeSourceReactions(id, progress.reactions, progress.creatorName,
-              stored.sourcePageMissing === false ? '' : run.settings.pageUrl);
+            if (stored.downloadStatus !== 'skipped') {
+              await observeSourceReactions(id, progress.reactions, progress.creatorName,
+                stored.sourcePageMissing === false ? '' : run.settings.pageUrl);
+              if (ISSFeed.needsReactionRefresh(progress.reactions)) await deferReactionPage(id, tabId, run.settings.pageUrl);
+            }
             run.catalogIds = [...new Set([...run.catalogIds, id])];
             run.catalogProcessedIds = [...new Set([...run.catalogProcessedIds, id])];
             await acceptManualRecords(run, [{ id }], [stored]);
@@ -680,7 +709,7 @@ async function checkPreparedUpload(entry) {
     if (!await liveSubscribers(entry)) return;
     entry.storageItem = stored;
     if (stored.exists) {
-      if (stored.downloadStatus !== 'skipped') observeSourceReactions(entry.record.id, entry.record.reactions, entry.record.creatorName,
+      if (stored.downloadStatus !== 'skipped') await observeSourceReactions(entry.record.id, entry.record.reactions, entry.record.creatorName,
         stored.sourcePageMissing === false ? '' : entry.record.capturedPageUrl);
       await completePreparedUpload(entry, stored);
     }
@@ -815,7 +844,9 @@ const autoBrowseCollector = ISSBrowseCollector.create({
   upsert: records => PromptCatalogDB.upsert(records), existing: id => PromptCatalogDB.get(id),
   processImage: (task, isCurrent) => ISSImageQueue.run(task, isCurrent),
   checkQueued: checkQueuedCatalogImage, primeChecks: primeCatalogChecks,
-  observeReactions: observeSourceReactions,
+  observeReactions: (id, reactions, creator, pageUrl) => observeSourceReactions(id, reactions, creator, pageUrl, { liveDom: true }),
+  statsOnly: (tabId, pageUrl) => sessions.get(tabId)?.settings.statsOnly === true && sessions.get(tabId).settings.pageUrl === pageUrl,
+  needsReactionRefresh: reactions => ISSFeed.needsReactionRefresh(reactions),
   sync: (records, options) => syncCloudCatalogItems(records, options),
   manualBusy: tabId => Number.isInteger(tabId) ? !!sessions.get(tabId)?.status.running : false, debug: addDebug,
   admit: (id, tabId, restore = false, stage = 'waitingDuplicateCheck') => reserveOutstanding(id, 'auto', tabId, stage, restore),
@@ -865,6 +896,7 @@ async function getBrowseStatus(tabId) {
     sourcePauseReason: source.pauseReason || '', retryAt,
     catalog: { ...catalogStatus, retryAt: Math.max(catalogStatus.retryAt, uploadCooldownUntil, run?.uploadRetryAt || 0) },
     reactionEnrichment: reactionPages.snapshot(),
+    sourceReactions: sourceReactionUpdates.snapshot(), statsOnly: run?.settings.statsOnly === true && run.settings.pageUrl === tab?.url,
     phase: sourcePaused ? source.authStatus ? 'Civitai needs attention' : 'waiting for Civitai cooldown'
       : pipeline.outstandingTotal >= OUTSTANDING_LIMIT && pipeline.paused ? 'shared queue full; resume paused tabs'
       : status.manualPaused ? run.status.phase || 'selected feed collecting' : status.phase,

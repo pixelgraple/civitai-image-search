@@ -127,7 +127,7 @@ test('same-version injection is idempotent and a previous observer is disposed o
   h.context.window.__ISS_BROWSE_OBSERVER.dispose(); await h.pulse(); assert.equal(h.messages.length, 1); assert.equal(h.listeners.size, 0); assert.equal(h.timers.size, 0);
 });
 test('legacy boolean guard no longer prevents updated observer installation', async () => {
-  const h = harness(); h.context.window.__ISS_BROWSE_OBSERVER = true; await h.start(); assert.equal(h.context.window.__ISS_BROWSE_OBSERVER.version, '2.8.19');
+  const h = harness(); h.context.window.__ISS_BROWSE_OBSERVER = true; await h.start(); assert.equal(h.context.window.__ISS_BROWSE_OBSERVER.version, '2.8.20');
   const rejected = harness('https://civitai.red.evil.example/'); await rejected.start(); assert.equal(rejected.statusCalls(), 0);
 });
 test('navigation during card submission never scrolls the new page using stale work', async () => {
@@ -247,5 +247,38 @@ test('server-rendered stats require the exact image query ID and never borrow po
   ];
   h.document.getElementById = () => ({ textContent: JSON.stringify({ props: { pageProps: { trpcState: { json: { queries } } } } }) });
   await h.start(); await h.pulse();
-  assert.deepEqual(h.messages[0].cards[0].reactions, { likeCount: 1234, heartCount: 0 });
+  assert.deepEqual(h.messages[0].cards[0].reactions, { likeCount: 3, heartCount: 0 });
+});
+
+test('animated digit reels use accessible exact counts and ignore hidden animation nodes', async () => {
+  const h = harness(), card = h.addCard(55);
+  const button = reactionButton(h, card.wrapper, '👍 45 ' + '0 1 2 3 4 5 6 7 8 9 '.repeat(8), { 'aria-label': 'Like reaction' });
+  let removed = false;
+  button.cloneNode = () => ({ querySelectorAll: () => [{ remove() { removed = true; } }], get textContent() { return removed ? '👍 45' : button.textContent; } });
+  const hidden = h.node('SPAN', button); hidden.textContent = '👍 999'; hidden.getAttribute = key => key === 'aria-hidden' ? 'true' : null;
+  await h.start(); await h.pulse();
+  assert.equal(removed, true); assert.deepEqual(h.messages[0].cards[0].reactions, { likeCount: 45 });
+});
+
+test('statsUnknown SSR never hides newly hydrated visible reactions', async () => {
+  const h = harness(), card = h.addCard(55); reactionButton(h, card.wrapper, '👍 45');
+  h.document.getElementById = () => ({ textContent: JSON.stringify({ props: { pageProps: { trpcState: { json: { queries: [
+    { queryKey: [['image', 'get'], { input: { id: 55 } }], state: { data: { id: 55, type: 'image', stats: { statsUnknown: true, likeCount: 0 } } } }
+  ] } } } } }) });
+  await h.start(); await h.pulse(); assert.deepEqual(h.messages[0].cards[0].reactions, { likeCount: 45 });
+});
+
+test('stats-only remains reaction-only after its feed finishes', async () => {
+  const h = harness(), card = h.addCard(55); reactionButton(h, card.wrapper, '❤️ 7');
+  await h.start(); await h.pulse({ statsOnly: true, manualPaused: false });
+  assert.equal(h.messages[0].reactionsOnly, true);
+});
+
+test('detail pages find controls outside the deeply nested image carousel', async () => {
+  const h = harness('https://civitai.red/images/55');
+  const center = h.node('DIV', h.body); let inner = center;
+  for (let i = 0; i < 8; i++) inner = h.node('DIV', inner);
+  h.addCard(55, { parent: inner }); reactionButton(h, center, '👍 44');
+  reactionButton(h, h.body, '👍 999', { 'aria-label': 'unrelated sidebar control' });
+  await h.start(); await h.pulse(); assert.equal(h.messages[0].cards[0].reactions.likeCount, 44);
 });

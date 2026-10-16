@@ -364,7 +364,7 @@
       button.setAttribute('aria-label', label);
     });
     $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('beforeend', creatorMarkup(row));
-    $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('afterend', `<section class="detail-section source-reaction-section"><div class="detail-heading"><h2>Civitai source reactions</h2><span class="read-only-label">Read-only</span></div><div class="source-reaction-values">${reactionMarkup(row, true)}</div><p>Captured when indexed. Your community reactions are counted separately on this site.</p></section>`);
+    $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('afterend', `<section class="detail-section source-reaction-section"><div class="detail-heading"><h2>Civitai source reactions</h2><span class="read-only-label">Read-only</span></div><div class="source-reaction-values">${reactionMarkup(row, true)}</div><p>Last captured while scanning or refreshing Civitai. Community reactions are counted separately on this site.</p></section>`);
     $('viewerPrev').disabled = state.viewerBusy || absoluteIndex <= 0;
     $('viewerNext').disabled = state.viewerBusy || absoluteIndex >= state.total - 1;
     $('viewerStatus').textContent = '';

@@ -4,9 +4,17 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.19](https://search-civitai.xyz/downloads/index-civitai-2.8.19.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.19)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.20](https://search-civitai.xyz/downloads/index-civitai-2.8.20.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.20)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Browsing requires a short SVG CAPTCHA after the preloader; a successful answer unlocks that browser session for one hour across its tabs. No account or contributor key is needed. Extension contributions continue independently of the website CAPTCHA.
+
+## Refresh Civitai reactions
+
+Every scan refreshes source reactions on images already in the library, including duplicate images skipped for downloading. The reader handles Civitai's animated digit counters and prefers exact hydrated values over older page snapshots.
+
+For a dedicated pass, stop a running scan on your chosen gallery, then click **Refresh Civitai stats only**. This starts at the beginning of that gallery's selected feed and updates existing records without reading prompts, ingesting images, or downloading files. Stop and Resume preserve the selected feed and position. Live counters show matched records, changed records, pending updates, and IDs not in the library. All-zero or incomplete feed snapshots get an image-page recheck; an unavailable response is reported rather than replacing known counts with invented zeroes.
+
+Matching uses the exact Civitai image ID. File SHA256 remains the server's storage-integrity/deduplication check: identical files posted under different IDs can have different reactions, so counts are never copied between posts just because their hashes match. Community votes remain independent. Counts are snapshots, updated when an image is revisited, not a continuous mirror of all Civitai images. Civitai concurrency (default 1, maximum 4 across tabs), cooldowns, and server writer quotas still apply.
 
 ## What it can do
 
@@ -30,7 +38,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.19.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.20.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.

@@ -32,15 +32,15 @@ function harness(items, respond, endpoint = 'image.getImagesAsPostsInfinite') {
   return { feed, calls, next: (processImage, onProgress, readReactions) => context.ISSFeed.next(feed, request, processImage, onProgress, readReactions) };
 }
 
-test('a missing core reaction field reads the image page once, while known zeros need no fallback', async () => {
+test('missing reactions and all-zero feed snapshots are rechecked on image pages', async () => {
   const complete = { likeCount: 0, heartCount: 0, laughCount: 0, cryCount: 0 };
   const h = harness([1, 2].map(id => ({ ...image(id), tags: ['landscape'],
     meta: { prompt: 'landscape', modelName: 'Camera', resources: [] }, stats: id === 1 ? complete : { likeCount: 12 } })),
   () => { throw new Error('Unexpected metadata API request'); }, 'image.getInfinite');
   const pages = [];
   const result = await h.next(undefined, undefined, async id => { pages.push(id); return { likeCount: 13, heartCount: 2, laughCount: 0, cryCount: 0 }; });
-  assert.deepEqual(pages, ['2']); assert.equal(result.catalogItems[1].reactions.likeCount, 13);
-  assert.deepEqual(JSON.parse(JSON.stringify(result.catalogItems[0].reactions)), complete);
+  assert.deepEqual(pages.sort(), ['1', '2']); assert.equal(result.catalogItems[1].reactions.likeCount, 13);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.catalogItems[0].reactions)), { likeCount: 13, heartCount: 2, laughCount: 0, cryCount: 0 });
 });
 test('image-page rate rejection prevents cursor advancement rather than losing missing reactions', async () => {
   const h = harness([{ ...image(55), tags: ['landscape'], meta: { prompt: 'landscape', modelName: 'Camera', resources: [] } }],
@@ -91,7 +91,7 @@ test('hydrates actual gallery wire shape from generation data and nested detail 
   assert.equal(page.catalogItems[0].prompt, 'selfie, beach');
   assert.equal(page.catalogItems[0].negativePrompt, 'blurry');
   assert.equal(page.catalogItems[0].modelName, 'Realistic checkpoint');
-  assert.deepEqual(Array.from(page.catalogItems[0].loras), ['Blue hair', 'Detail helper']);
+  assert.deepEqual(Array.from(page.catalogItems[0].loras), ['Blue hair', 'v2', 'Detail helper', 'v1']);
   assert.deepEqual(Array.from(page.catalogItems[0].tags), ['selfie', 'beach']);
   assert.deepEqual(h.calls.map(x => x.procedure), ['image.getImagesAsPostsInfinite', 'image.getGenerationData', 'image.getDetail']);
   assert.equal(h.calls.every(x => x.origin === 'https://civitai.red'), true);

@@ -2,6 +2,15 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.20 — Refresh Civitai stats
+
+- Add a stats-only gallery scan, using exact source IDs to update existing records without prompt reads or new image downloads. Preserve its mode and cursor across restart and resume.
+- Refresh reactions when normal scans encounter stored images; recheck all-zero and incomplete feed snapshots.
+- Read accessible animated counts instead of hidden digit reels, handle deeply nested image viewers, and prefer hydrated exact counts over stale/unknown SSR metadata.
+- Prefer all-time source counters when both all-time and generic aliases exist; preserve unknowns and allow genuine count decreases.
+- Show live matched, changed, missing-library, queued, sending and retry statistics. Keep bounded metadata batches and existing source cooldowns.
+- Preserve originals, SHA256 values, prompts and independent community votes. Update the contributor guide and extension download.
+
 ## 2.8.19 — Panel opening recovery
 
 - Rebuild panels removed during Civitai navigation instead of toggling a detached element.

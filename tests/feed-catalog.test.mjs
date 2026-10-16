@@ -23,6 +23,12 @@ function requestUrl() {
   return url.href;
 }
 
+test('all-time reaction aliases override generic zero defaults', () => {
+  const feed = loadFeed({});
+  assert.deepEqual(JSON.parse(JSON.stringify(feed.imageReactions({ likeCount: 0, likeCountAllTime: 44, heartCount: 0, heartCountAllTime: 32 }))),
+    { likeCount: 44, heartCount: 32 });
+});
+
 test('indexes image URL, prompt, negative prompt, tags, model, and LoRA from a feed page', async () => {
   const image = { id: 135960467, type: 'image', url: 'https://image.civitai.com/key/abc/width=450/135960467.jpg',
     meta: { prompt: 'selfie, anime style', negativePrompt: 'blurry', modelName: 'Anime checkpoint', resources: [{ type: 'lora', name: 'Blue Hair LoRA' }] } };

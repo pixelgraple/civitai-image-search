@@ -1,7 +1,7 @@
 // Observe visible cards passively; scroll only the exact gallery with an active scan.
 (() => {
   'use strict';
-  const VERSION = '2.8.19';
+  const VERSION = '2.8.20';
   if (location.protocol !== 'https:' || !['civitai.com', 'civitai.red'].includes(location.hostname)) return;
   if (window.__ISS_BROWSE_OBSERVER?.version === VERSION) return;
   window.__ISS_BROWSE_OBSERVER?.dispose?.();
@@ -52,9 +52,9 @@
     }
     return null;
   }
-  const reactionAliases = { likeCount: ['likeCount', 'likeCountAllTime'], heartCount: ['heartCount', 'heartCountAllTime'],
-    laughCount: ['laughCount', 'laughCountAllTime'], cryCount: ['cryCount', 'cryCountAllTime'],
-    buzzCount: ['buzzCount', 'buzzCountAllTime', 'tippedAmountCountAllTime'] };
+  const reactionAliases = { likeCount: ['likeCountAllTime', 'likeCount'], heartCount: ['heartCountAllTime', 'heartCount'],
+    laughCount: ['laughCountAllTime', 'laughCount'], cryCount: ['cryCountAllTime', 'cryCount'],
+    buzzCount: ['buzzCountAllTime', 'buzzCount', 'tippedAmountCountAllTime'] };
   function sourceStats(stats) {
     const result = {};
     if (!stats || stats.statsUnknown === true) return result;
@@ -103,7 +103,8 @@
   }
   function cardRoot(image, id) {
     let root = image.parentElement;
-    for (let depth = 0, parent = root?.parentElement; parent && depth < 6; depth++, parent = parent.parentElement) {
+    const maxDepth = location.pathname === `/images/${id}` ? 12 : 6;
+    for (let depth = 0, parent = root?.parentElement; parent && depth < maxDepth; depth++, parent = parent.parentElement) {
       if (parent === document.body || parent === document.documentElement) break;
       const walk = document.createTreeWalker(parent, 1); let node, count = 0, otherImage = false;
       while ((node = walk.nextNode()) && ++count <= 240) {
@@ -121,7 +122,15 @@
     const walk = document.createTreeWalker(root, 1); let node, visited = 0;
     while ((node = walk.nextNode()) && ++visited <= 240) {
       if (!['BUTTON', 'SPAN', 'DIV', 'A'].includes(node.tagName)) continue;
-      const text = String(node.textContent || '').trim();
+      // Animated counters contain hidden digit reels (0123456789 for each
+      // position). Read their accessible exact count, not all animation text.
+      let hidden = false;
+      for (let parent = node; parent && parent !== root; parent = parent.parentElement)
+        if (parent.getAttribute?.('aria-hidden') === 'true') { hidden = true; break; }
+      if (hidden) continue;
+      const copy = node.cloneNode?.(true);
+      copy?.querySelectorAll?.('[aria-hidden="true"]').forEach(child => child.remove());
+      const text = String(copy?.textContent ?? node.textContent ?? '').trim();
       if (text.length > 120) continue;
       const attributes = child => ['aria-label', 'title', 'data-reaction', 'data-testid', 'class']
         .map(name => child.getAttribute?.(name) || '').join(' ');
@@ -151,10 +160,10 @@
     return result;
   }
   function reactionsFor(image, id) {
-    // Server-rendered exact metadata is preferred to compact UI text.
+    // Hydrated exact counts supersede the older server-rendered snapshot.
+    // statsUnknown describes that snapshot, not the now-visible controls.
     const stats = pageStats();
-    if (nextDataUnknown.has(id)) return {};
-    return { ...domReactions(cardRoot(image, id)), ...(stats.get(id) || {}) };
+    return { ...(stats.get(id) || {}), ...domReactions(cardRoot(image, id)) };
   }
   const reactionSignature = (reactions, creatorName = '') => JSON.stringify([Object.keys(reactions).sort().map(key => [key, reactions[key]]), creatorName]);
   function resetPage() {
@@ -255,7 +264,7 @@
       observeCards();
       const cards = collectCards().filter(card => !status.manualPaused || Object.keys(card.reactions).length || card.creatorName);
       if (cards.length) {
-        const response = await send({ type: 'civitai-auto-cards', pageUrl, cards, ...(status.manualPaused ? { reactionsOnly: true } : {}) });
+        const response = await send({ type: 'civitai-auto-cards', pageUrl, cards, ...((status.manualPaused || status.statsOnly) ? { reactionsOnly: true } : {}) });
         if (disposed || scanEpoch !== epoch || pageUrl !== location.href) return;
         if (!response?.ok) throw new Error(response?.error || 'Automatic collection unavailable.');
         if (scanStatusEpoch === statusEpoch) {

@@ -16,6 +16,24 @@ async function harness({ saved = [], post, cooldownUntil = () => 0 } = {}) {
   return { queue, calls, writes, errors, timers, now: () => now,
     async advance(ms) { now += ms; for (const [id, timer] of [...timers]) if (timer.at <= now && timers.delete(id)) timer.fn(); await flush(); } };
 }
+test('stats-only drops unknown library IDs immediately and reports changes separately', async () => {
+  const h = await harness({ post: () => ({ accepted: 1, updated: 1, missingIds: ['56'] }) });
+  await h.queue.observe('55', { likeCount: 45 }, { dropMissing: true });
+  await h.queue.observe('56', { likeCount: 20 }, { dropMissing: true });
+  await h.advance(3000);
+  assert.equal(h.queue.snapshot().updated, 1); assert.equal(h.queue.snapshot().changed, 1);
+  assert.equal(h.queue.snapshot().notInLibrary, 1); assert.equal(h.queue.snapshot().queued, 0);
+});
+test('live DOM counts beat stale feed snapshots; genuine decreases and repeat scans work', async () => {
+  const h = await harness();
+  await h.queue.observe('55', { likeCount: 45 }, { liveDom: true });
+  await h.queue.observe('55', { likeCount: 0, heartCount: 20 });
+  await h.advance(3000); assert.equal(h.calls[0].items[0].reactions.likeCount, 45);
+  await h.queue.observe('55', { likeCount: 44 }, { liveDom: true });
+  await h.advance(3000); assert.equal(h.calls[1].items[0].reactions.likeCount, 44);
+  await h.queue.observe('55', { likeCount: 44 }, { force: true });
+  await h.advance(3000); assert.equal(h.calls.length, 3, 'explicit rescan bypasses sent-count cache');
+});
 test('reaction updates coalesce across tabs, preserve zero, and retain absent fields', async () => {
   const h = await harness();
   await h.queue.observe('55', { likeCount: 0, heartCount: '7', cryCount: -1, arbitrary: 25 });
@@ -25,6 +43,13 @@ test('reaction updates coalesce across tabs, preserve zero, and retain absent fi
   await h.advance(1); assert.deepEqual(h.calls[0].items, [{ id: '55', reactions: { likeCount: 0, heartCount: 7 } }]);
   assert.equal(h.queue.snapshot().queued, 0); assert.equal(h.queue.snapshot().updated, 1);
   await h.queue.observe('55', { likeCount: 0, heartCount: 7 }); await h.advance(3000); assert.equal(h.calls.length, 1);
+});
+
+test('a stats-only scan cannot discard a concurrent normal insertion retry', async () => {
+  const h = await harness({ post: () => ({ accepted: 0, missingIds: ['55'] }) });
+  await h.queue.observe('55', { likeCount: 45 });
+  await h.queue.observe('55', { likeCount: 45 }, { dropMissing: true, force: true });
+  await h.advance(3000); assert.equal(h.queue.snapshot().queued, 1);
 });
 test('batches at most60 updates per3seconds, restores pending metadata after restart', async () => {
   const saved = Array.from({ length: 65 }, (_, i) => ({ id: String(i + 1), reactions: { likeCount: 0 } }));

@@ -137,8 +137,13 @@ def run():
                            'downloadUrl': 'https://127.0.0.1/no-request', 'file_path': str(temp / 'escape'), 'command': 'must not run'}
                 check(refresh([payload])[2]['accepted'] == 1 and state_except_source_counts() == before, 'source refresh preserves prompt, classification, FTS, media, download state and community votes')
                 check(not list(media.glob('.image-locks/*')), 'source refresh creates no image lock files')
-                visible = next(item for item in request('search&q=fixture')[2]['items'] if item['id'] == '41')
-                check(visible['reactions']['likeCount'] == 6, 'refreshed counts are visible through normal search')
+                # Browsing now requires a CAPTCHA session. Exercise the same
+                # public serializer directly against this isolated database;
+                # do not disable or change the production access gate.
+                visible = json.loads(subprocess.check_output([PHP, '-r',
+                    "require $argv[1]; echo json_encode(public_image_row(db()->query(\"SELECT * FROM images WHERE image_id='41'\")->fetch()));",
+                    str(ROOT / 'lib.php')], env={**os.environ, 'CIVITAI_LIBRARY_CONFIG': str(config_file)}))
+                check(visible['reactions']['likeCount'] == 6, 'refreshed counts are visible through the public record serializer')
 
                 # Preflight exposes completeness without treating zero as absent. Use pending ID so no real media needed.
                 with sqlite3.connect(database) as db:

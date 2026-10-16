@@ -18,7 +18,7 @@ function harness(body, status = 200) {
 test('image-page fallback fetches only HTML and extracts exact source stats without media or execution', async () => {
   const h = harness(html([query(55, { likeCountAllTime: 0, heartCountAllTime: 12 })]));
   const result = await h.request('https://civitai.red/images/55');
-  assert.equal(result.ok, true); assert.deepEqual(JSON.parse(JSON.stringify(result.data)), { id: '55', stats: { likeCountAllTime: 0, heartCountAllTime: 12 } });
+  assert.equal(result.ok, true); assert.deepEqual(JSON.parse(JSON.stringify(result.data)), { id: '55', stats: { likeCountAllTime: 0, heartCountAllTime: 12 }, username: '' });
   assert.equal(h.calls.length, 1); assert.equal(h.calls[0].options.credentials, 'same-origin');
   assert.equal(h.calls[0].options.headers.Accept, 'text/html'); assert.equal(h.calls[0].options.redirect, 'error');
 });

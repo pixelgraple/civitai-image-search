@@ -149,6 +149,7 @@ globalThis.ISSBrowseCollector = (() => {
       // Chrome's current tab URL is authoritative; reported URLs still match exactly.
       const current = page((await deps.tab(tabId))?.url);
       if (!current || current.href !== reported.href) return { ok: false, error: 'Auto collection requires the current Civitai page.' };
+      if (deps.statsOnly?.(tabId, reported.href)) message = { ...message, reactionsOnly: true };
       if (!await configured() || saved.suspended || paused(tabId)) return { ok: true, active: false, accepted: [] };
       // A selected feed owns discovery for its tab. Its visual scroll may run,
       // but reporting the same cards must not build a second metadata queue.
@@ -271,6 +272,7 @@ globalThis.ISSBrowseCollector = (() => {
           }
           await deps.observeReactions?.(entry.card.id, entry.card.reactions, entry.card.creatorName,
             result.sourcePageMissing === false ? '' : entry.pageUrl);
+          if (deps.needsReactionRefresh?.(entry.card.reactions)) await deps.deferReactions?.(entry);
           // A verified original can still be pending its thumbnail repair. Its
           // source metadata and original transfer do not need to be repeated.
           markProcessed(entry); remove(entry); markSeen(entry.card.id);
@@ -329,8 +331,9 @@ globalThis.ISSBrowseCollector = (() => {
             tabState(entry.tabId).skippedPromptless++; touch(entry.tabId, 'skipped image without prompt'); await persist(); return null;
           }
         }
-        if (deps.deferReactions && !['likeCount', 'heartCount', 'laughCount', 'cryCount'].every(key =>
-          Number.isSafeInteger(record.reactions?.[key]) && record.reactions[key] >= 0)) {
+        if (deps.deferReactions && (!['likeCount', 'heartCount', 'laughCount', 'cryCount'].every(key =>
+          Number.isSafeInteger(record.reactions?.[key]) && record.reactions[key] >= 0) ||
+          ['likeCount', 'heartCount', 'laughCount', 'cryCount'].every(key => record.reactions?.[key] === 0))) {
           await deps.deferReactions(entry, record);
           if (!await current()) return null;
         }
