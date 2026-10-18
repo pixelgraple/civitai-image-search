@@ -72,7 +72,7 @@ header('X-Frame-Options: DENY');
     </div>
   </dialog>
   <noscript><div class="access-noscript"><h1>JavaScript is needed to continue.</h1><p>Enable JavaScript and reload this page to complete verification and open the image library.</p><a href="/guide.php">Read the contributor guide</a></div></noscript>
-  <script src="access-gate.js?v=captcha1" defer></script>
+  <script src="access-gate.js?v=deadline60" defer></script>
   <script src="gallery-images.js?v=cards1" defer></script>
   <script src="popular.js?v=discovery1" defer></script>
 </body>

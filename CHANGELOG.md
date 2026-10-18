@@ -2,6 +2,13 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## Website and operations - Search deadlines (2026-10-18)
+
+- End browser requests after 60 seconds with visible error/Retry handling; retain directory pages' shorter 20-second limit.
+- Match the Nginx deadline to the dedicated PHP pool's existing 60-second limit.
+- Add an optional 60-second guard for root SSH diagnostic file searches, excluding application services and streaming pipe filters.
+- Cover timeout, navigation cancellation, response-body stalls, verification, and process selection with focused regression checks.
+
 ## 2.8.24 - Reliable toolbar launcher
 
 - Open toolbar controls through a browser-owned popup independently of the collector service worker.

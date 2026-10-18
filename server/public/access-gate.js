@@ -209,7 +209,8 @@
     const abort = () => controller.abort();
     if (init.signal?.aborted) abort(); else init.signal?.addEventListener('abort', abort, { once: true });
     requests.add(controller);
-    const timeout = setTimeout(abort, 45000);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; abort(); }, 60000);
     try {
       const response = await fetch(url, { ...init, credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
       const body = await response.arrayBuffer();
@@ -222,6 +223,11 @@
         }
       }
       return new Response([204, 205, 304].includes(response.status) ? null : body, { status: response.status, statusText: response.statusText, headers: response.headers });
+    } catch (error) {
+      // A deadline must render the caller's error/Retry UI. Navigation and a
+      // locked session still use their existing silent-cancellation behavior.
+      if (timedOut) throw Object.assign(new Error('The request timed out after 60 seconds. Please try again.'), { name: 'RequestTimeoutError' });
+      throw error;
     } finally { clearTimeout(timeout); requests.delete(controller); init.signal?.removeEventListener('abort', abort); }
   }
   function ensureAccess() {
