@@ -1,11 +1,11 @@
 // Index Civitai sends prompt metadata and source URLs to the public shared catalog.
 // The server owns image transfers. This extension has no file download API.
-importScripts('catalog-metadata.js', 'state-checkpoint.js', 'collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
+importScripts('catalog-metadata.js', 'reaction-backlog.js', 'state-checkpoint.js', 'collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
 
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.21', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.22', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -36,6 +36,11 @@ const catalogChecks = ISSCatalogChecks.create({ post: imageIds => postCatalog('c
 const checkQueuedCatalogImage = (id, isCurrent) => catalogChecks.check(id, isCurrent);
 const primeCatalogChecks = (ids, isCurrent) => catalogChecks.prime(ids, isCurrent);
 const sourceReactionUpdates = ISSSourceReactions.create({
+  backlog: ISSReactionBacklog.create('updates', (old, item) => ({ ...old, ...item,
+    reactions: { ...(old.reactions || {}), ...item.reactions }, creatorName: item.creatorName || old.creatorName || '',
+    capturedPageUrl: old.capturedPageUrl || item.capturedPageUrl || '',
+    retainMissing: old.retainMissing === true || item.retainMissing === true,
+    dropMissing: item.dropMissing === true && (!old.id || old.dropMissing === true) && !old.retainMissing && !item.retainMissing })),
   post: items => postCatalog('source-reactions', { items }),
   load: () => readStorage('civitaiSourceReactionQueueV1'),
   save: value => writeStorage('civitaiSourceReactionQueueV1', value),
@@ -45,6 +50,8 @@ const sourceReactionUpdates = ISSSourceReactions.create({
 const observeSourceReactions = (id, reactions, creatorName = '', capturedPageUrl = '', options = {}) => sourceReactionUpdates.observe(id, reactions,
   { creatorName, capturedPageUrl: ISSFeed.imagePageUrl(id, capturedPageUrl), ...options });
 const reactionPages = ISSReactionPages.create({
+  backlog: ISSReactionBacklog.create('pages', (old, item) => ({ ...old, ...item,
+    attempts: Math.max(old.attempts || 0, item.attempts || 0), retryAt: Math.max(old.retryAt || 0, item.retryAt || 0) })),
   load: () => readStorage('civitaiReactionPagesV1'), save: value => writeStorage('civitaiReactionPagesV1', value),
   observe: (id, reactions, capturedPageUrl) => sourceReactionUpdates.observe(id, reactions,
     { retainMissing: true, capturedPageUrl: ISSFeed.imagePageUrl(id, capturedPageUrl) }), changed: notifyStatusChanged,
@@ -353,6 +360,10 @@ async function restoreAll() {
     if (validFeed(prior.feed, pageUrl)) run.feed = { ...prior.feed, pages: Math.max(0, Number(prior.feed.pages) || 0),
       retryAt: Math.max(0, Math.min(Number(prior.feed.retryAt) || 0, Date.now() + 300000)) };
     Object.assign(run.status, { stopped: !!prior.status?.stopped, stopReason: String(prior.status?.stopReason || ''), lastError: String(prior.status?.lastError || '').slice(0,500) });
+    if (/^The (reaction enrichment|source reaction update) queue is full;/.test(run.status.lastError)) {
+      run.status.lastError = ''; run.uploadRetryAt = 0; run.uploadFailures = 0;
+      if (run.feed) { run.feed.retryAt = 0; run.feed.failures = 0; }
+    }
     if (/contributor|connection.required|key is invalid/i.test(run.status.lastError)) run.status.lastError = '';
     sessions.set(tabId, run); drivers.set(tabId, driver);
     const sourceTab = await getTab(tabId);

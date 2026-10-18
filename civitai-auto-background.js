@@ -102,6 +102,9 @@ globalThis.ISSBrowseCollector = (() => {
       saved.processed = Math.max(Number(saved.processed) || 0, Number(saved.synced) || 0);
       saved.publicMode = true; pruneSeen();
       retryAt = Math.max(0, Math.min(Number(saved.retryAt) || 0, Date.now() + 300000)); saved.retryAt = retryAt;
+      const queueFull = message => /^The (reaction enrichment|source reaction update) queue is full;/.test(message || '');
+      if (queueFull(saved.lastError)) { saved.lastError = ''; retryAt = saved.retryAt = 0; }
+      for (const state of Object.values(saved.tabs)) if (queueFull(state.lastError)) state.lastError = '';
       // Earlier versions presented ordinary queue handoff cancellation as an
       // error. Clear that exact marker, while retaining any persisted cooldown.
       let clearedCancellation = false;

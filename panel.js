@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.21', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.22', ROOT_ID = '__iss_panel_root';
   const previousRoot = document.getElementById(ROOT_ID);
   if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
     try { window.__ISS_TOGGLE_PANEL(); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
@@ -144,6 +144,9 @@
     const stats = browse?.sourceReactions;
     $('reactionStatus').textContent = (state?.settings?.statsOnly ? `Stats-only scan: ${count(s.processed)} checked on this tab · ${count(s.statsUnavailable)} unavailable. ` : 'Every scan refreshes existing Civitai reactions. ') +
       (stats ? `Stats updates · all tabs since reload: ${count(stats.updated)} matched · ${count(stats.changed)} changed · ${count(stats.notInLibrary)} not in library · ${count(stats.queued)} queued${stats.busy ? ' · sending' : ''}.${stats.lastError ? ` ${stats.lastError}` : ''}${stats.retryAt > Date.now() ? ` Retry in ${count(Math.ceil((stats.retryAt - Date.now()) / 1000))}s.` : ''}` : 'Stats-only mode updates existing records without downloading images.');
+    const enrichment = browse?.reactionEnrichment;
+    if (enrichment) $('reactionStatus').textContent += ` Page lookups: ${count(enrichment.queued)} pending · ${count(enrichment.active)} active · ${count(enrichment.deferred)} in saved backlog. Prompt uploads continue independently.`;
+    if (Number(stats?.deferred)) $('reactionStatus').textContent += ` ${count(stats.deferred)} stats updates saved for later.`;
     $('reactionStatus').classList.toggle('error', !!stats?.lastError);
     $('stop').disabled = !busy && !autoRunning; $('resume').hidden = (!state?.canResume && !browse?.tabPaused) || busy; $('resume').disabled = busy;
     $('status').textContent = message || s.lastError || browse?.lastError || (s.running ? `Feed page ${count(state?.feed?.pages || s.driverBatch || 1)} · ${state?.driver?.phase || s.driverPhase || 'indexing prompts'}` : browse?.tabPaused ? 'Collection is stopped for this tab. Resume tab to continue.' : complete ? `This tab’s feed reached the end.${autoRunning ? ' Automatic collection stays on for new gallery images.' : ' Scan this tab to start again.'}` : autoRunning ? 'Visible images are collected as you browse. Choose Scan this tab to scroll this gallery automatically. Other tabs keep manual scrolling.' : state?.canResume ? 'This tab’s feed is paused. Resume its saved position, or start a fresh scan here.' : s.stopped ? 'This tab’s scan stopped. Start a fresh scan from the selected page.' : 'Scan this page’s selected feed. You can run other Civitai tabs at the same time. Keep each source tab open.');

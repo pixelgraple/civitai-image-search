@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.21', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.22', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
   $('panelOpenError').hidden = typeof location === 'undefined' || new URL(location.href).searchParams.get('panelError') !== '1';
   let settingsOpen = false, saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
@@ -120,6 +120,8 @@
       const last = Math.max(Number(status?.lastActivityAt) || 0, Number(scans?.status?.lastActivityAt) || 0);
       $('activityDetails').textContent = `${count(amount(scans?.status?.processed) + amount(status?.processed))} processed · ${count(pipeline ? pipeline.accepted : amount(scans?.status?.catalogSynced) + amount(status?.synced))} accepted · ${count(amount(scans?.status?.catalogOversizeSkipped) + amount(status?.skippedOversize))} oversized skipped (max 9 MP, 4096 pixels per side) · ${String(status?.phase || 'waiting for gallery images').replace(/[-_]/g, ' ')}${last ? ` · last activity ${count(Math.floor(Math.max(0, Date.now() - last) / 1000))}s ago` : ''}`;
       $('activityDetails').textContent += ' · '+count(amount(scans?.status?.catalogRejected)+amount(status?.skippedInvalid))+' invalid metadata set aside';
+      const enrichment = status?.reactionEnrichment, stats = status?.sourceReactions;
+      if (enrichment) $('activityDetails').textContent += ` · Reaction page lookups: ${count(enrichment.queued)} pending, ${count(enrichment.active)} active, ${count(enrichment.deferred)} in saved backlog. Stats updates: ${count(stats?.queued)} queued, ${count(stats?.deferred)} in saved backlog. Prompt uploads run independently.`;
       const runs = Array.isArray(scans?.runs) ? scans.runs : [];
       $('feedSummary').hidden = !runs.length;
       $('feedRuns').textContent = runs.map(run => {

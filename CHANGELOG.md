@@ -2,6 +2,15 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.22 - Independent reaction backlog
+
+- Fix the full reaction-enrichment queue interrupting prompt collection and causing misleading upload retries.
+- Save overflow page lookups and stats updates in IndexedDB, with bounded 600-item working sets and no local image downloads.
+- Preserve existing pending work on reload. Clear only the obsolete queue-full retry message and its collector delay.
+- Retry unavailable source pages and not-yet-indexed stats individually, so unrelated records can continue.
+- Show reaction page lookups and saved backlog counts separately from the shared image queue.
+- Keep Civitai concurrency settings, rate-limit cooldowns, 60-record metadata batches and three-second upload pacing.
+
 ## 2.8.21 — Resilient metadata uploads
 
 - Normalize LoRA/tag labels at the upload boundary, including old queued records: clean control characters and whitespace, preserve Unicode characters, deduplicate, and apply the server name/count limits.
