@@ -2,6 +2,12 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## Server — Reaction update contention (2026-10-18)
+
+- Reserve the SQLite writer before reading and merging reaction updates, avoiding immediate WAL read-to-write upgrade failures during image ingestion.
+- Preserve partial counts, idempotent updates and atomic rollback. Source cooldowns and the extension queues are unchanged; no extension reload is needed.
+- Add an isolated held-writer regression test and update the API method check to expect the current HTTP 405 response.
+
 ## 2.8.22 - Independent reaction backlog
 
 - Fix the full reaction-enrichment queue interrupting prompt collection and causing misleading upload retries.

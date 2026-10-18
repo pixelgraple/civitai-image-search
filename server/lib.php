@@ -214,10 +214,14 @@ function update_source_reactions(PDO $pdo,array $items): array {
     if (!$records) return compact('accepted','updated','skipped','missingIds');
     $find=$pdo->prepare('SELECT reactions_json,creator_name,source_page_url FROM images WHERE image_id=?');
     $update=$pdo->prepare('UPDATE images SET reactions_json=?,creator_name=?,source_page_url=?,updated_at=? WHERE image_id=?');
-    $pdo->beginTransaction();
+    // Reserve the writer before reading counts. Upgrading a deferred WAL read
+    // transaction can fail immediately under ingestion/worker writes, ignoring
+    // busy_timeout and forcing otherwise valid reaction batches to retry.
+    $pdo->exec('BEGIN IMMEDIATE');
+    $transaction=true;
     try {
         foreach ($records as $id=>$record) {
-            $id=(string)$id; $find->execute([$id]); $row=$find->fetch();
+            $id=(string)$id; $find->execute([$id]); $row=$find->fetch(); $find->closeCursor();
             if (!$row) { $missingIds[]=$id; continue; }
             $prior=normalize_reactions(json_decode($row['reactions_json'],true));
             $merged=array_replace($prior,$record['reactions']);
@@ -226,9 +230,9 @@ function update_source_reactions(PDO $pdo,array $items): array {
             if ($merged==$prior && $creator===(string)$row['creator_name'] && $pageUrl===(string)$row['source_page_url']) continue;
             $update->execute([json_encode((object)$merged,JSON_THROW_ON_ERROR),$creator,$pageUrl,gmdate('c'),$id]); $updated++;
         }
-        $pdo->commit();
+        $pdo->exec('COMMIT'); $transaction=false;
     } catch (Throwable $error) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($transaction) $pdo->exec('ROLLBACK');
         throw $error;
     }
     return compact('accepted','updated','skipped','missingIds');

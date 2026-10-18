@@ -104,7 +104,8 @@ def run():
                         db.execute('INSERT INTO images_fts(image_id,prompt,tags) VALUES(?,?,?)', (image_id, 'fixture ' + image_id, 'fixture'))
                     db.execute('INSERT INTO community_reactions(image_id,visitor_hash,reaction_type,created_at) VALUES(?,?,?,?)', ('41', 'b' * 64, 'heart', 10))
                 before = state_except_source_counts()
-                check(request('source-reactions')[0] == 404, 'refresh requires POST')
+                status, headers, _ = request('source-reactions')
+                check(status == 405 and headers.get('Allow') == 'POST', 'refresh requires POST')
                 for invalid in (None, [], {}, ['x'] * 101):
                     check(request('source-reactions', {'items': invalid})[0] == 400, 'invalid batch rejected')
 
