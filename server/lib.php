@@ -618,11 +618,13 @@ function public_ingest_client_id(): string {
     return 'public:'.hash('sha256','index-civitai-ingest:'.$packed);
 }
 
+require_once __DIR__.'/ingest-limits.php';
+
 function limit_contributor_requests(string $id, bool $public=false): void {
     $cfg=config();
     $limit=max(1,min(1200,(int)($cfg[$public?'public_ingest_requests_per_minute':'contributor_requests_per_minute']??120)));
     $maxClients=max(1,min(100000,(int)($cfg['ingest_max_active_clients']??10000)));
-    $window=intdiv(time(),60)*60; $pdo=db(); $blocked=false;
+    $window=intdiv(time(),60)*60; $pdo=ingest_limits_db(); $blocked=false;
     $pdo->beginTransaction();
     try {
         // The first write serializes the capacity check and insert. Retain only the current minute.

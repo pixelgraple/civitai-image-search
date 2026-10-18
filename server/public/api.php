@@ -429,6 +429,8 @@ try {
     header('Retry-After: 2'); json_response(['ok'=>false,'error'=>'Image storage is busy; retry this batch shortly.'],503);
 } catch (Throwable $error) {
     if ($error instanceof PDOException && in_array(((int)($error->errorInfo[1]??0))&255,[5,6],true)) {
+        // Private operational evidence only; never include request bodies, tokens or SQL parameters.
+        error_log('CIVITAI_STORAGE_BUSY '.json_encode(['action'=>$action,'file'=>basename($error->getFile()),'line'=>$error->getLine(),'code'=>(int)($error->errorInfo[1]??0)]));
         header('Retry-After: 2'); json_response(['ok'=>false,'error'=>'Catalog storage is busy; retry this batch shortly.'],503);
     }
     error_log('Civitai library API error: ' . $error->getMessage());

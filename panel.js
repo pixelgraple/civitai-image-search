@@ -1,10 +1,10 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.23', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.24', ROOT_ID = '__iss_panel_root';
   const previousRoot = document.getElementById(ROOT_ID);
   if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
-    try { window.__ISS_TOGGLE_PANEL(); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
+    try { window.__ISS_TOGGLE_PANEL(true); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
   }
   try { window.__ISS_DISPOSE_PANEL?.(); } catch { /* An old extension context may be invalid. */ }
   previousRoot?.remove();
@@ -267,7 +267,7 @@
   const visible = () => { if (!document.hidden) refresh(); };
   const escape = event => { if (event.key === 'Escape' && settingsOpen && event.composedPath?.().includes(root)) { showSettings(false); event.preventDefault?.(); return; } if (event.key === 'Escape' && event.composedPath?.().includes(root) && root.style.display !== 'none' && (starting || state?.status?.running || (browse?.enabled && !browse?.tabPaused))) stop(); };
   const timer = setInterval(() => { if (!portReady) refresh(); else render(); downloadControl.tick(); }, 2000); document.addEventListener('visibilitychange', visible); document.addEventListener('keydown', escape, true);
-  window.__ISS_TOGGLE_PANEL = () => { root.style.display = root.style.display === 'none' ? 'block' : 'none'; refresh(); };
+  window.__ISS_TOGGLE_PANEL = (show = false) => { root.style.display = show || root.style.display === 'none' ? 'block' : 'none'; refresh(); };
   window.__ISS_DISPOSE_PANEL = () => { disposed = true; speedControl.dispose(); sourceControl.dispose(); downloadControl.dispose(); ++startEpoch; captureController?.abort(); clearInterval(timer); clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); disconnectStatus(statusPort, true); document.removeEventListener('visibilitychange', visible); document.removeEventListener('keydown', escape, true); root.remove(); };
   render(); connectStatus(); refresh();
   window.__ISS_PANEL_VERSION = VERSION;

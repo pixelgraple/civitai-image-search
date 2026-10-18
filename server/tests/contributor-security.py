@@ -64,6 +64,7 @@ def run():
         temp = pathlib.Path(temporary)
         registry_path = temp / "contributors.json"
         database_path = temp / "catalog.sqlite"
+        quota_database = pathlib.Path(str(database_path) + ".ingest-limits.sqlite")
         settings_path = temp / "settings.json"
         config_path = temp / "config.php"
         media_path = temp / "media"
@@ -163,7 +164,7 @@ def run():
                 settings_path.write_text(json.dumps(settings), encoding="utf-8")
                 if time.time() % 60 > 57:
                     time.sleep(3)
-                with sqlite3.connect(database_path) as conn:
+                with sqlite3.connect(quota_database) as conn:
                     conn.execute("DELETE FROM ingest_request_windows")
                 check(request("writer-status", token=first["token"])[0] == 200, "first request within contributor quota succeeds")
                 check(request("check", "POST", {"imageIds": ["42"]}, first["token"])[0] == 200, "second request within contributor quota succeeds")
@@ -171,7 +172,7 @@ def run():
                 check(status == 429 and 1 <= int(headers.get("Retry-After", "0")) <= 60, "over-quota contributor receives HTTP 429 and Retry-After")
                 check(request("writer-status", token=second["token"])[0] == 200, "one contributor cannot consume another contributor's quota")
                 check(request("writer-status", token=OWNER_TOKEN)[0] == 200, "owner has a separate request quota")
-                with sqlite3.connect(database_path) as conn:
+                with sqlite3.connect(quota_database) as conn:
                     conn.execute("UPDATE ingest_request_windows SET window_start=? WHERE contributor_id=?", (int(time.time() // 60) * 60 - 60, first["id"]))
                 check(request("writer-status", token=first["token"])[0] == 200, "expired contributor request window resets normally")
                 settings["contributor_requests_per_minute"] = 120

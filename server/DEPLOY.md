@@ -20,6 +20,7 @@ Copy `config.example.php` to `/data/civitai/config/config.php` and review its va
 | Legacy protected-mode key, root-only | /data/civitai/config/contributor.key |
 | Optional protected-mode credential registry | /data/civitai/config/contributors.json |
 | SQLite/FTS database | /data/civitai/database/catalog.sqlite |
+| Ingestion request quotas | /data/civitai/database/catalog.sqlite.ingest-limits.sqlite |
 | Originals, thumbnails, worker lock | /data/civitai/media/ |
 | Site/PHP/worker logs | /data/civitai/logs/ |
 | Certificate, ACME account/renewal state | /data/civitai/tls/ |
@@ -75,6 +76,8 @@ Set `public_ingest_enabled` to the boolean `true` in the private server configur
 The public endpoints allow only catalog checks and metadata submission. Image URLs remain restricted to the approved Civitai HTTPS CDN hosts, image IDs must be positive numeric IDs, and the worker validates JPEG/PNG/WebP content, maximum file size, and total storage capacity. Client-supplied filesystem paths and commands are ignored. There is no filesystem browser, shell, arbitrary file upload, deletion, or credential-management API.
 
 The default request budget is 120 ingestion requests per minute per client address, shared across that client's tabs; each submission can include up to 100 records. `public_ingest_requests_per_minute` adjusts this budget (1–1200). HTTP 429 responses include `Retry-After` for automatic backoff. Public reads do not consume ingestion quota. This quota uses only PHP's `REMOTE_ADDR`, canonicalizes equivalent addresses, and stores a SHA256 address identifier. It never trusts request headers such as `X-Forwarded-For`, `X-Real-IP`, or `CF-Connecting-IP`. If a trusted reverse proxy is used, configure and verify its real-address handling in Nginx before exposing the API; PHP must receive the verified client address. Quota rows expire after one minute and are removed during subsequent ingestion requests. `ingest_max_active_clients` bounds the table to 10,000 active client rows by default (maximum 100,000); capacity exhaustion returns a temporary 429 instead of creating unbounded state.
+
+Ingestion request quotas use a separate private SQLite database beside the catalog, named by appending `.ingest-limits.sqlite` to `database_path`. Deploy `ingest-limits.php` with `lib.php`. The first request initializes it and copies the current minute's legacy quota rows once; subsequent checks never write to the image catalog just to count a request. The same client identity, per-minute limit and capacity bound apply. Include its WAL/SHM files in directory permissions and preserve this database during deployments. The legacy quota table remains for rollback compatibility. This separates accounting from catalog writer contention; image updates can still return retryable storage errors.
 
 ## Optional protected-mode administration
 

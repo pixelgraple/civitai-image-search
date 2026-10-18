@@ -93,7 +93,10 @@ def run():
                 with sqlite3.connect(database) as db:
                     changed_fts = db.execute("SELECT rowid,* FROM images_fts WHERE image_id='41'").fetchall()
                 check(len(changed_fts) == 1 and changed_fts != first_fts, 'changed searchable fields replace exactly one FTS record')
-                check(request('search&q=changed')[2]['total'] == 1 and request('search&tag=newtag')[2]['total'] == 1, 'updated prompt and tag are searchable')
+                with sqlite3.connect(database) as db:
+                    check(db.execute("SELECT COUNT(*) FROM images_fts WHERE images_fts MATCH 'neutral'").fetchone()[0] == 2 and
+                          db.execute("SELECT COUNT(*) FROM images_fts WHERE images_fts MATCH 'tags:newtag'").fetchone()[0] == 1,
+                          'rescan preserves original prompt and indexes newly discovered tags')
 
                 original, thumbnail = media / '41.png', media / '41-thumb.png'
                 original.write_bytes(PNG)

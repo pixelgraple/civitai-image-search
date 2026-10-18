@@ -51,6 +51,7 @@ def run():
     with tempfile.TemporaryDirectory(prefix="index-civitai-public-") as temporary:
         temp = pathlib.Path(temporary)
         database = temp / "catalog.sqlite"
+        quota_database = pathlib.Path(str(database) + ".ingest-limits.sqlite")
         settings_path = temp / "settings.json"
         config_path = temp / "config.php"
         media = temp / "media"
@@ -67,7 +68,7 @@ def run():
             settings_path.write_text(json.dumps(settings), encoding="utf-8")
 
         def reset_quota():
-            with sqlite3.connect(database) as conn:
+            with sqlite3.connect(quota_database) as conn:
                 conn.execute("DELETE FROM ingest_request_windows")
 
         save_settings()
@@ -107,15 +108,18 @@ def run():
                     row = conn.execute("SELECT prompt,file_path,download_status,source_url FROM images WHERE image_id='900000099'").fetchone()
                 check(row == (item["prompt"], None, "pending", source) and not outside.exists(), "prompt and URL persist; supplied local paths and commands cannot write files")
                 status, _, result = request("search&q=selfie&tag=selfie")
-                check(status == 200 and result.get("total") == 1 and result["items"][0]["prompt"] == item["prompt"], "anonymous search returns the indexed prompt and correct matching count")
-                check(result["items"][0]["category"] == "realistic", "metadata style classification remains available")
+                check(status == 403 and result.get('code') == 'captcha_required', "anonymous ingestion does not bypass browsing verification")
+                with sqlite3.connect(database) as conn:
+                    check(conn.execute("SELECT prompt FROM images_fts WHERE images_fts MATCH 'selfie'").fetchall() == [(item['prompt'],)], "indexed prompt remains searchable")
+                    check(conn.execute("SELECT style_category FROM images WHERE image_id=?", (item['id'],)).fetchone()[0] == 'realistic', "metadata style classification remains available")
                 with sqlite3.connect(database) as conn:
                     signals = json.loads(conn.execute("SELECT style_signals_json FROM images WHERE image_id='900000099'").fetchone()[0])
                 check(not any(s["category"] == "anime" for s in signals), "new uploads ignore disabled anime LoRAs")
                 check(any(s["source"] == "model" and s["rule"] == "realism" for s in signals), "new uploads recognize compound realism model names")
                 status, _, result = request("images", "POST", {"items": [{"id": item["id"], "downloadUrl": source}]})
                 check(status == 200 and result.get("accepted") == 1, "an incomplete rescan preserves a known positive prompt")
-                check(request("search&q=meadow")[2]["items"][0]["prompt"] == item["prompt"], "rescan preserves searchable original prompt")
+                with sqlite3.connect(database) as conn:
+                    check(conn.execute("SELECT prompt FROM images_fts WHERE images_fts MATCH 'meadow'").fetchone()[0] == item['prompt'], "rescan preserves searchable original prompt")
                 promptless = [{"id": "900000100", "downloadUrl": source}, {"id": "900000101", "downloadUrl": source, "prompt": " \n\t\u00a0", "tags": ["selfie"]}, {"id": "900000102", "downloadUrl": source, "negativePrompt": "selfie"}]
                 locks_before_promptless = set(media.glob(".image-locks/*.lock"))
                 status, _, result = request("images", "POST", {"items": promptless})
@@ -130,6 +134,7 @@ def run():
                     check(request(action, "POST", {"path": str(outside)})[0] == 404, "public API exposes no " + action + " operation")
                 with sqlite3.connect(database) as conn:
                     check(conn.execute("SELECT COUNT(*) FROM images").fetchone()[0] == 1, "invalid and promptless submissions create no catalog records")
+                with sqlite3.connect(quota_database) as conn:
                     entries = conn.execute("SELECT contributor_id FROM ingest_request_windows").fetchall()
                 expected_id = "public:" + hashlib.sha256(b"index-civitai-ingest:" + socket.inet_pton(socket.AF_INET, HOST)).hexdigest()
                 check(entries == [(expected_id,)] and HOST not in expected_id, "quota stores a canonical address hash instead of a raw address or supplied token")
@@ -145,7 +150,7 @@ def run():
                 for headers in ({"X-Forwarded-For": "198.51.100.2"}, {"X-Real-IP": "198.51.100.3", "CF-Connecting-IP": "198.51.100.4"}, {"Forwarded": "for=198.51.100.5", "Authorization": "Bearer another-token"}):
                     status, response_headers, _ = request("writer-status", extra_headers=headers)
                     check(status == 429 and 1 <= int(response_headers.get("Retry-After", "0")) <= 60, "spoofed headers cannot bypass quota; retry delay is bounded")
-                with sqlite3.connect(database) as conn:
+                with sqlite3.connect(quota_database) as conn:
                     check(conn.execute("SELECT COUNT(*),MAX(request_count) FROM ingest_request_windows").fetchone() == (1, 2), "over-quota requests cannot grow state or overflow counters")
                     conn.execute("UPDATE ingest_request_windows SET window_start=?", (int(time.time() // 60) * 60 - 60,))
                 check(request("writer-status")[0] == 200, "expired request window is removed and collection resumes")
@@ -154,14 +159,14 @@ def run():
                 save_settings()
                 reset_quota()
                 window = int(time.time() // 60) * 60
-                with sqlite3.connect(database) as conn:
+                with sqlite3.connect(quota_database) as conn:
                     conn.executemany("INSERT INTO ingest_request_windows VALUES(?,?,?)", [("fixture-client-one", window, 1), ("fixture-client-two", window, 1)])
                 check(request("writer-status")[0] == 429, "new client cannot grow quota state past configured capacity")
-                with sqlite3.connect(database) as conn:
+                with sqlite3.connect(quota_database) as conn:
                     check(conn.execute("SELECT COUNT(*) FROM ingest_request_windows").fetchone()[0] == 2, "active quota row bound remains exact")
                     conn.execute("UPDATE ingest_request_windows SET window_start=?", (window - 60,))
                 check(request("writer-status")[0] == 200, "expired clients release capacity for public collection")
-                with sqlite3.connect(database) as conn:
+                with sqlite3.connect(quota_database) as conn:
                     check(conn.execute("SELECT COUNT(*) FROM ingest_request_windows").fetchone()[0] == 1, "expired quota rows are cleaned during ingestion")
                     check(conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "isolated database remains valid")
 

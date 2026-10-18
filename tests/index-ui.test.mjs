@@ -92,9 +92,11 @@ function panelHarness({ initialize = true, configured = true, config = {}, state
   return { get, messages, get root() { return root; }, events, transport, window, cloud, context, inject };
 }
 
-test('toolbar reinjection toggles a connected panel without opening duplicate status ports', async () => {
+test('toolbar retries keep a connected panel visible without duplicate status ports', async () => {
   const h = panelHarness(); await flush(); const root = h.root;
-  assert.equal(h.inject().ok, true); assert.equal(root.style.display, 'none');
+  assert.equal(h.inject().ok, true); assert.equal(root.style.display, 'block');
+  assert.equal(h.inject().ok, true); assert.equal(root.style.display, 'block');
+  await h.get('close').dispatch('click'); assert.equal(root.style.display, 'none');
   assert.equal(h.inject().ok, true); assert.equal(root.style.display, 'block');
   assert.equal(h.root, root); assert.equal(h.transport.ports.length, 1);
 });

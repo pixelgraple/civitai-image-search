@@ -2,6 +2,14 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.24 - Reliable toolbar launcher
+
+- Open toolbar controls through a browser-owned popup independently of the collector service worker.
+- Inject the panel immediately instead of waiting for a gallery to finish loading. Display page/worker errors after bounded waits, with Retry and a user-triggered Restart action.
+- Reopening keeps the panel visible; delayed or repeated injections cannot toggle it closed. Opening controls does not start a scan or reset queued work.
+- Keep the existing collector limits, retry policy, and saved queues. Include launcher recovery regression coverage.
+- Separate server ingestion request quotas from the main catalog writer so duplicate checks do not wait behind image writes merely to count a request. Preserve active quota counters and limits, and add held-writer and concurrent-quota regression coverage.
+
 ## Website - Discovery performance (2026-10-18)
 
 - Add a covering snapshot index for preview availability and PG-13 checks on Models, LoRAs, Creators, Recipes, and Prompt Explorer.

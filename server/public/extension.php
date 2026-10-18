@@ -11,17 +11,17 @@ header('X-Frame-Options: DENY');
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Index Civitai turns the galleries you browse into a shared searchable library of images and prompts. Install the free community extension.">
   <title>Index Civitai · Install the community indexing extension</title>
-  <link rel="stylesheet" href="extension.css?v=2.8.23">
+  <link rel="stylesheet" href="extension.css?v=2.8.24">
   <link rel="stylesheet" href="guide.css?v=contributor-guide-v1">
 </head>
 <body>
-  <header class="site-header"><a class="brand" href="/">SEARCH<span>CIVITAI</span><small>XYZ</small></a><nav class="contributor-nav" aria-label="Site navigation"><a class="library-nav" href="/">Image library</a><a class="nav-download" href="/downloads/index-civitai-2.8.23.zip" download>Index Civitai ↓</a><a class="nav-guide" href="/guide.php">GUIDE</a></nav></header>
+  <header class="site-header"><a class="brand" href="/">SEARCH<span>CIVITAI</span><small>XYZ</small></a><nav class="contributor-nav" aria-label="Site navigation"><a class="library-nav" href="/">Image library</a><a class="nav-download" href="/downloads/index-civitai-2.8.24.zip" download>Index Civitai ↓</a><a class="nav-guide" href="/guide.php">GUIDE</a></nav></header>
   <main>
     <section class="intro">
-      <p class="eyebrow">COMMUNITY EXTENSION · VERSION 2.8.23</p>
+      <p class="eyebrow">COMMUNITY EXTENSION · VERSION 2.8.24</p>
       <h1>Browse Civitai.<br>Build a library everyone can search.</h1>
       <p class="lead">Index Civitai collects image links, prompts and generation details from your chosen galleries. The server saves image copies, and the community can search everything indexed so far.</p>
-      <div class="actions"><a class="button primary" href="/downloads/index-civitai-2.8.23.zip" download>Download Index Civitai 2.8.23</a><a class="button" href="#install">Installation guide ↓</a><a class="button" href="/guide.php">How to help index Civitai ↗</a></div>
+      <div class="actions"><a class="button primary" href="/downloads/index-civitai-2.8.24.zip" download>Download Index Civitai 2.8.24</a><a class="button" href="#install">Installation guide ↓</a><a class="button" href="/guide.php">How to help index Civitai ↗</a></div>
       <p class="caption">For desktop Chromium browsers, including Chrome and Brave. No account or contributor key required.</p>
     </section>
     <section aria-labelledby="features"><div class="section-title"><p class="eyebrow">WHAT IT DOES</p><h2 id="features">Your browsing helps grow the shared index.</h2></div>
@@ -42,7 +42,7 @@ header('X-Frame-Options: DENY');
         <li><strong>Choose Load unpacked.</strong><span>Select the extracted folder containing <code>manifest.json</code>.</span></li>
         <li><strong>Open a Civitai gallery.</strong><span>Works on civitai.com and civitai.red. Open Index Civitai, choose settings with the cogwheel, click <strong>Done</strong>, then <strong>Scan this tab</strong>. Follow the <a href="/guide.php">contributor guide</a> for the full walkthrough.</span></li>
       </ol>
-      <p class="update"><strong>Already installed?</strong> Replace the files in your extension folder, click <strong>Reload</strong> on the Extensions page, and refresh your Civitai gallery tabs. Save unfinished upload or edit forms before refreshing them. Version 2.8.23 retries temporary connection failures automatically after five seconds and keeps queued work and feed positions. The panel shows a retry countdown. Connection-failed scans recover on reload if their source tab is still open; manually stopped scans remain stopped. Civitai rate-limit waits and login checks still apply. Includes the independent reaction backlog from 2.8.22.</p>
+      <p class="update"><strong>Already installed?</strong> Replace the files in your extension folder, click <strong>Reload</strong> on the Extensions page, and refresh your Civitai gallery tabs. Save unfinished upload or edit forms before refreshing them. Version 2.8.24 opens the collection panel through an independent toolbar launcher, with clear errors and Retry or Restart controls if the page or collector does not respond. Saved queues and feed positions are retained. Existing five-second network retries and source cooldowns still apply.</p>
     </section>
     <section class="details" aria-labelledby="details-title"><p class="eyebrow">HOW COLLECTION WORKS</p><h2 id="details-title">A few useful details</h2>
       <details><summary>Does it run without me scrolling?</summary><p>Yes. Click <strong>Scan this tab</strong> on your chosen gallery. That tab can collect without focus while the browser stays open; your other Civitai browsing tabs stay under your control. Collection pauses when the queue is full, and sleeping computers or suspended tabs cannot continue normal work. See the <a href="/guide.php">contributor guide</a> for the steps and progress messages.</p></details>
@@ -54,6 +54,6 @@ header('X-Frame-Options: DENY');
     </section>
     <section class="closing"><div><h2>Help make prompts easier to find.</h2><p>Index the galleries you choose, then search the growing community library.</p></div><a class="button primary" href="/">Explore the library ↗</a></section>
   </main>
-  <footer><span>Independent community project.</span><a href="/guide.php">Contributor guide</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">Source and documentation on GitHub ↗</a><a href="/downloads/index-civitai-2.8.23.zip" download>Download 2.8.23</a></footer>
+  <footer><span>Independent community project.</span><a href="/guide.php">Contributor guide</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">Source and documentation on GitHub ↗</a><a href="/downloads/index-civitai-2.8.24.zip" download>Download 2.8.24</a></footer>
 </body>
 </html>

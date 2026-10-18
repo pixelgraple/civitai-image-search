@@ -5,7 +5,7 @@ importScripts('retry-policy.js', 'catalog-metadata.js', 'reaction-backlog.js', '
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.23', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.24', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -1212,7 +1212,7 @@ chrome.runtime.onConnect.addListener(connectStatusPort);
 chrome.action.onClicked.addListener(async tab => {
   if (!ISSBrowseCollector.page(tab?.url)) { await openLibrary(); return; }
   try {
-    const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-feed-capture.js', 'download-control.js', 'source-control.js', 'panel.js'] });
+    const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, injectImmediately: true, files: ['civitai-feed-capture.js', 'download-control.js', 'source-control.js', 'panel.js'] });
     const result = results?.[0]?.result;
     if (!result?.ok || result.panelVersion !== BACKGROUND_VERSION) throw new Error(result?.error || 'The collection panel did not finish opening.');
     await Promise.allSettled([chrome.action.setBadgeText({ tabId: tab.id, text: '' }), chrome.action.setTitle({ tabId: tab.id, title: 'Index Civitai' })]);

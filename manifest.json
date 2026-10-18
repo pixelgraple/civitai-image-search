@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Index Civitai",
-  "version": "2.8.23",
+  "version": "2.8.24",
   "description": "Anyone can index prompts while browsing Civitai. Images save on the shared server. No key, account, or local image downloads.",
   "permissions": [
     "storage",
@@ -30,7 +30,8 @@
     }
   ],
   "action": {
-    "default_title": "Index Civitai"
+    "default_title": "Index Civitai",
+    "default_popup": "popup.html"
   },
   "host_permissions": [
     "https://search-civitai.xyz/*",
