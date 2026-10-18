@@ -79,6 +79,8 @@ The default request budget is 120 ingestion requests per minute per client addre
 
 Ingestion request quotas use a separate private SQLite database beside the catalog, named by appending `.ingest-limits.sqlite` to `database_path`. Deploy `ingest-limits.php` with `lib.php`. The first request initializes it and copies the current minute's legacy quota rows once; subsequent checks never write to the image catalog just to count a request. The same client identity, per-minute limit and capacity bound apply. Include its WAL/SHM files in directory permissions and preserve this database during deployments. The legacy quota table remains for rollback compatibility. This separates accounting from catalog writer contention; image updates can still return retryable storage errors.
 
+Only this expiring quota database uses a persistent PDO connection and WAL `synchronous=NORMAL`, avoiding a disk sync on each request and a checkpoint at each FPM request shutdown. An unexpected machine crash can lose recent counts from the current minute. Catalog durability is unchanged, and limits remain atomic across concurrent requests.
+
 ## Optional protected-mode administration
 
 These commands are only needed for a separate installation with `public_ingest_enabled=false`. The shared public site does not require contributor credentials. In protected mode, issue one credential per contributor from the server's administrator shell:

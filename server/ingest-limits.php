@@ -12,10 +12,16 @@ function ingest_limits_db(): PDO {
     $path=$catalog.'.ingest-limits.sqlite';
     if (is_link($path)) throw new RuntimeException('Invalid indexing limit database.');
     $new=!is_file($path);
-    $pdo=new PDO('sqlite:'.$path,null,null,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
+    // FPM reuses this small connection; closing the last WAL connection after
+    // every request would checkpoint and sync the disk on every quota update.
+    $pdo=new PDO('sqlite:'.$path,null,null,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC,PDO::ATTR_PERSISTENT=>true]);
     if ($new) @chmod($path,0640);
     $pdo->exec('PRAGMA busy_timeout=5000');
     if (strtolower((string)$pdo->query('PRAGMA journal_mode')->fetchColumn())!=='wal') $pdo->exec('PRAGMA journal_mode=WAL');
+    // These counters expire in one minute. WAL/NORMAL retains atomic accounting
+    // without an fsync for every request. A machine crash can lose recent quota
+    // counts, but never changes the catalog's own durability or corrupts this DB.
+    $pdo->exec('PRAGMA synchronous=NORMAL');
     $version=(int)$pdo->query('PRAGMA user_version')->fetchColumn();
     if ($version===0) {
         $pdo->exec('BEGIN IMMEDIATE');
