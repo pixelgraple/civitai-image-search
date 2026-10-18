@@ -38,6 +38,11 @@ def search_arguments(executable, args):
         if arg.startswith('-') and not arg.startswith('--') and any(c in arg[1:] for c in 'rR'): return True
     return False
 
+def login_session(cgroup):
+    # A disconnected SSH shell can be reparented to PID 1 while its search
+    # keeps running. The root login-session cgroup still identifies that work.
+    return any('/user.slice/user-0.slice/session-' in line and line.endswith('.scope') for line in cgroup.splitlines())
+
 def candidates():
     uptime = float((PROC / 'uptime').read_text().split()[0])
     for p in PROC.iterdir():
@@ -50,8 +55,9 @@ def candidates():
         try:
             executable = os.path.realpath(p / 'exe')
             args = (p / 'cmdline').read_bytes().decode('utf-8', 'replace').rstrip('\0').split('\0')
+            cgroup = (p / 'cgroup').read_text()
         except OSError: continue
-        if search_arguments(executable, args) and from_ssh(row):
+        if search_arguments(executable, args) and (from_ssh(row) or login_session(cgroup)):
             yield {**row, 'age': uptime - row['start'] / TICKS}
 
 def log(**values): print(json.dumps(values), flush=True)
@@ -70,7 +76,7 @@ def run():
                     log(pid=pid, action='kill', reason='60-second search deadline')
                     os.close(fd); del pending[pid]
             for row in candidates():
-                if row['age'] < 59 or row['pid'] in pending: continue
+                if row['age'] < 58 or row['pid'] in pending: continue
                 fd = None
                 try:
                     fd = os.pidfd_open(row['pid'])
@@ -82,7 +88,7 @@ def run():
                     log(pid=row['pid'], action='terminate', age=round(row['age'], 2), reason='60-second search deadline')
                 except ProcessLookupError:
                     if fd is not None: os.close(fd)
-            time.sleep(.25)
+            time.sleep(1)
     finally:
         for fd, _ in pending.values(): os.close(fd)
 
