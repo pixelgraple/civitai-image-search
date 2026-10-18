@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+const version = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8')).version;
 const sourceControl = fs.readFileSync(new URL('../source-control.js', import.meta.url), 'utf8');
 const downloadStub = { create: () => ({ accept() {}, tick() {}, dispose() {} }) };
 const library = fs.readFileSync(new URL('../library.js', import.meta.url), 'utf8');
@@ -32,8 +33,8 @@ function transportHarness({ connectFails = false } = {}) {
 }
 const speedProfile = multiplier => ({ multiplier, sourceConcurrency: 1, sourceStartLimit: 1, metadataConcurrency: Math.round(12 * multiplier), uploadBatchSize: 60, uploadIntervalMs: 3000, sourceIntervalMs: Math.round(1000 / multiplier), outstandingLimit: 600 });
 const speedConfig = multiplier => ({ sourceConcurrency: 1, speedMultiplier: multiplier, collectionSpeed: speedProfile(multiplier) });
-const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: '2.8.20', statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
-function libraryHarness({ pageUrl = 'chrome-extension://test-extension/library.html', config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = '2.8.20', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+const pushed = ({ state = { status: {}, activeTabs: 0, runs: [] }, browse = {}, source = {}, config = {}, ...rest } = {}) => ({ type: 'index-civitai-status', backgroundVersion: version, statusProtocol: 1, state, browse: { ok: true, enabled: true, ...browse }, source: { ok: true, ...source }, config: { autoBrowse: true, ...speedConfig(1), ...config }, ...rest });
+function libraryHarness({ pageUrl = 'chrome-extension://test-extension/library.html', config = {}, failSave = false, failFetch = false, scans = { activeTabs: 0, status: {}, runs: [] }, browse = {}, backgroundVersion = version, statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], requests = [], intervals = [], intervalDelays = [];
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -58,7 +59,7 @@ function libraryHarness({ pageUrl = 'chrome-extension://test-extension/library.h
   } });
   return { get, cloud, messages, requests, intervals, intervalDelays, transport };
 }
-function panelHarness({ initialize = true, configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = '2.8.20', statusProtocol = 1, connectFails = false, speedHandler } = {}) {
+function panelHarness({ initialize = true, configured = true, config = {}, state = { status: {}, feed: {} }, browse = {}, capture = async () => ['https://civitai.red/api/trpc/image.getInfinite?x=1'], source = {}, backgroundVersion = version, statusProtocol = 1, connectFails = false, speedHandler } = {}) {
   const elements = new Map(), messages = [], events = {};
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -188,7 +189,7 @@ test('public UI has no connection form or credential fields', () => {
   assert.doesNotMatch(html, /contributorKey|connectionForm|type="password"|Disconnect/);
   assert.doesNotMatch(library, /writeToken|Authorization|writer-status|chrome\.storage/);
   assert.doesNotMatch(panel, /contributor key|Contributor connection|Connection &amp; browsing/);
-  assert.match(panel, /Browsing &amp; activity/); assert.match(html, /2\.8\.20/);
+  assert.match(panel, /Browsing &amp; activity/); assert.ok(html.includes(version));
 });
 
 test('panel starts only selected feed and offers resume for saved stopped progress', async () => {
@@ -359,7 +360,7 @@ test('settings push updates combined queues immediately without polling or serve
   h.transport.ports[0].emit(pushed({ state: { activeTabs: 2, status: { pending: 7, processed: 9, catalogSynced: 6 }, runs: [] }, browse: { pending: 4, pendingTotal: 4, synced: 8, processed: 12, phase: 'reading prompts' } }));
   assert.equal(h.get('pendingCount').textContent, '11'); assert.equal(h.get('syncedCount').textContent, '14');
   assert.match(h.get('queueBreakdown').textContent, /4 automatic · 7 feed/); assert.match(h.get('activityDetails').textContent, /21 processed · 14 accepted.*reading prompts/);
-  assert.match(h.get('connectionStatus').textContent, /Background 2\.8\.20 · Live/);
+  assert.equal(h.get('connectionStatus').textContent, `Background ${version} · Live activity updates`);
   assert.equal(h.messages.length, messages); assert.equal(h.requests.length, requests);
   await h.intervals[0](); assert.equal(h.messages.length, messages, 'A healthy port replaces polling');
 });
