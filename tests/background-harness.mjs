@@ -2,7 +2,33 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { webcrypto } from 'node:crypto';
 export const root = fileURLToPath(new URL('../', import.meta.url));
+// Background integration tests exercise queue scheduling with a memory-backed
+// backlog adapter. They do not claim to verify browser IndexedDB persistence.
+function installBacklog(context) {
+  let revision=0;
+  context.ISSReactionBacklog={create: (_kind,merge=(old,item)=>({...old,...item}))=>{
+    const rows=new Map();
+    return {ready:Promise.resolve(),count:()=>rows.size,
+      put:async item=>{const old=rows.get(item.id);const value=merge(old?.item||{},structuredClone(item));rows.set(item.id,{item:value,revision:++revision});},
+      peek:async(limit,now)=>[...rows.values()].filter(row=>(row.item.retryAt||0)<=now).slice(0,limit).map(row=>structuredClone(row)),
+      remove:async id=>rows.delete(String(id)),
+      removeMany:async items=>{for(const item of items)if(rows.get(item.id)?.revision===item.revision)rows.delete(item.id);}
+    };
+  }};
+}
+function installDownloadSettings(context) {
+  vm.runInContext(fs.readFileSync(path.join(root, 'download-settings.js'), 'utf8'), context);
+  const create=context.ISSDownloadSettings.create;
+  // These queue tests mock image/check requests. Transfer preferences have
+  // their own dedicated tests; provide their normal acknowledgement here.
+  context.ISSDownloadSettings={...context.ISSDownloadSettings,create:deps=>create({...deps,
+    post:async(action,body)=>action==='download-settings'
+      ? {ok:true,concurrency:body.concurrency??32,serverMax:32}
+      : action==='download-status' ? {ok:true,items:[],server:{limit:32,active:0}} : deps.post(action,body)
+  })};
+}
 export function installCheckpoint(context) {
   vm.runInContext(fs.readFileSync(path.join(root, 'state-checkpoint.js'), 'utf8'), context);
   const checkpoint = context.ISSStateCheckpoint;
@@ -41,13 +67,15 @@ export async function harness(saved = {}, options = {}) {
   };
   // Any accidental access to the removed browser-download API fails a test.
   Object.defineProperty(chrome, 'downloads', { get() { started.push('forbidden'); throw new Error('Browser downloads are forbidden'); } });
-  const context = vm.createContext({ console, chrome, URL, AbortController, AbortSignal, TextDecoder, TextEncoder, structuredClone,
+  const context = vm.createContext({ console, chrome, crypto: webcrypto, URL, AbortController, AbortSignal, TextDecoder, TextEncoder, structuredClone,
     fetch: async () => { throw new Error('Test catalog transport must be stubbed explicitly'); },
     setTimeout, clearTimeout,
     setInterval: () => 0, clearInterval() {} });
   options.setupContext?.(context);
   context.importScripts = (...files) => files.forEach(file => file === 'state-checkpoint.js'
-    ? installCheckpoint(context) : vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context));
+    ? installCheckpoint(context) : file === 'reaction-backlog.js' ? installBacklog(context)
+      : file === 'download-settings.js' ? installDownloadSettings(context)
+      : vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context));
   vm.runInContext(fs.readFileSync(path.join(root, 'background.js'), 'utf8'), context);
   await vm.runInContext('ready', context);
   const run = code => vm.runInContext(code, context);

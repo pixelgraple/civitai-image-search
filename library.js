@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.22', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.23', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
   $('panelOpenError').hidden = typeof location === 'undefined' || new URL(location.href).searchParams.get('panelError') !== '1';
   let settingsOpen = false, saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;

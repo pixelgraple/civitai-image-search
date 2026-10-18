@@ -330,16 +330,16 @@ test('collection speed changes keep uploads at three seconds and retain server R
       : { ok: true, accepted: body.items.length, skipped: 0 }));
   };
   await h.setSpeed(1);
-  const first = h.run(`syncCloudCatalogItems([${JSON.stringify(record(1))}])`);
+  const first = h.run(`syncCloudCatalogItems([${JSON.stringify(record(1))}],{tabId:7})`);
   await h.clock.advance(100); assert.equal(requests.length, 1, 'early check does not wait for upload');
   await h.setSpeed(5); await h.clock.advance(2999); assert.equal(requests.length, 1);
   await h.clock.advance(1); await first; await flush(); assert.equal(requests.length, 2);
-  const second = h.run(`syncCloudCatalogItems([${JSON.stringify(record(2))}])`); await h.setSpeed(1);
+  const second = h.run(`syncCloudCatalogItems([${JSON.stringify(record(2))}],{tabId:7})`); await h.setSpeed(1);
   await h.clock.advance(100); assert.equal(requests.length, 3);
   await h.clock.advance(2999); assert.equal(requests.length, 3);
   await h.clock.advance(1); await second; await flush(); assert.equal(requests.length, 4);
   h.context.fetch = async () => new Response('{}', { status: 429, headers: { 'Retry-After': '90' } });
-  const refused = observe(h.run(`syncCloudCatalogItems([${JSON.stringify(record(3))}])`)); await h.clock.advance(3000);
+  const refused = observe(h.run(`syncCloudCatalogItems([${JSON.stringify(record(3))}],{tabId:7})`)); await h.clock.advance(3000);
   assert.equal((await refused).ok, false); const retryAt = h.run('nextUploadAt');
   assert.ok(retryAt >= h.clock.now() + 90000);
   await h.setSpeed(5); assert.ok(h.run('nextUploadAt') >= retryAt, 'speed cannot shorten a server cooldown');
@@ -356,12 +356,12 @@ test('max-speed upload batches stay within60 records and the server byte limit',
       ? { ok: true, items: body.imageIds.map(imageId => ({ imageId, exists: false, needsDownload: true, sha256: '', downloadStatus: 'unknown' })) }
       : { ok: true, accepted: body.items.length, skipped: 0 }));
   };
-  const sync = h.run(`syncCloudCatalogItems(${JSON.stringify(Array.from({ length: 101 }, (_, i) => record(i + 1)))})`);
+  const sync = h.run(`syncCloudCatalogItems(${JSON.stringify(Array.from({ length: 101 }, (_, i) => record(i + 1)))},{tabId:7})`);
   await h.clock.advance(100); await h.clock.advance(1000);
   await h.clock.advance(2000); await h.clock.advance(3000); await sync;
   assert.deepEqual(batches, [60, 41]);
   const longRecords = Array.from({ length: 100 }, (_, i) => ({ ...record(i + 200), prompt: '雪'.repeat(10000) }));
-  const large = h.run(`syncCloudCatalogItems(${JSON.stringify(longRecords)})`);
+  const large = h.run(`syncCloudCatalogItems(${JSON.stringify(longRecords)},{tabId:7})`);
   await h.clock.advance(1000);
   for (let batch = 0; batch < 4; batch++) await h.clock.advance(3000);
   await large;

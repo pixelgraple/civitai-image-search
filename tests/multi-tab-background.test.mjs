@@ -113,7 +113,7 @@ test('duplicate checks and record uploads use independent serial lanes with pace
     await new Promise(resolve=>setTimeout(resolve,5));inFlight[action]--;call.finishedAt=Date.now();
     return new Response(JSON.stringify(action==='check'?{ok:true,items:body.imageIds.map(imageId=>({imageId,exists:false,needsDownload:true,sha256:'',downloadStatus:'unknown'}))}:{ok:true,accepted:body.items.length,skipped:0}),{status:200});
   };
-  await Promise.all([h.run(`syncCloudCatalogItems(${JSON.stringify(Array.from({length:100},(_,index)=>page(index+1).catalogItems[0]))})`),h.run(`syncCloudCatalogItems(${JSON.stringify(Array.from({length:21},(_,index)=>page(index+101).catalogItems[0]))})`)]);
+  await Promise.all([h.run(`syncCloudCatalogItems(${JSON.stringify(Array.from({length:100},(_,index)=>page(index+1).catalogItems[0]))},{tabId:7})`),h.run(`syncCloudCatalogItems(${JSON.stringify(Array.from({length:21},(_,index)=>page(index+101).catalogItems[0]))},{tabId:7})`)]);
   assert.deepEqual(peak,{check:1,images:1});
   const checks=calls.filter(call=>call.action==='check'),uploads=calls.filter(call=>call.action==='images');
   assert.deepEqual(checks.map(call=>call.body.imageIds.length),[100,21],'duplicate checks coalesce separately into up to100 IDs');

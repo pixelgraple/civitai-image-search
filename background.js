@@ -1,11 +1,11 @@
 // Index Civitai sends prompt metadata and source URLs to the public shared catalog.
 // The server owns image transfers. This extension has no file download API.
-importScripts('catalog-metadata.js', 'reaction-backlog.js', 'state-checkpoint.js', 'collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
+importScripts('retry-policy.js', 'catalog-metadata.js', 'reaction-backlog.js', 'state-checkpoint.js', 'collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
 
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.22', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.23', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -234,10 +234,11 @@ function ensureManualSubmission(run, record) {
   })().catch(async error => {
     if (current() && error.status !== 409) {
       if (!(run.uploadRetryAt > Date.now())) run.uploadFailures = (run.uploadFailures || 0) + 1;
-      run.uploadRetryAt = Date.now() + Math.min(300000, Math.max(error.status === 429 ? 60000 : 5000 * 2 ** Math.min(6, (run.uploadFailures || 1) - 1), error.retryAfterMs || 0));
+      const transient = ISSRetryPolicy.isTransient(error);
+      run.uploadRetryAt = Date.now() + (transient ? ISSRetryPolicy.delay(error) : Math.min(300000, Math.max(5000 * 2 ** Math.min(6, (run.uploadFailures || 1) - 1), error.retryAfterMs || 0)));
       run.status.lastError = String(error.message || 'Server upload failed.').slice(0, 500);
       run.status.phase = 'waiting for server retry'; run.status.lastActivityAt = Date.now();
-      if ([400, 401, 403, 404].includes(error.status) || (run.uploadFailures >= 3 && ![429, 503].includes(error.status)))
+      if ([400, 401, 403, 404].includes(error.status) || (run.uploadFailures >= 3 && !transient))
         await stopSession(run.sessionTabId, 'upload-error', run.status.lastError);
       else await persistState(run);
     }
@@ -369,12 +370,19 @@ async function restoreAll() {
     const sourceTab = await getTab(tabId);
     run.orphaned = ISSBrowseCollector.page(sourceTab?.url)?.href !== pageUrl;
     retainPreparedOrphanWork(run);
-    if (prior.status?.running || prior.status?.scanning) {
+    const recoverConnection = ['upload-error', 'feed-error'].includes(run.status.stopReason) &&
+      ISSRetryPolicy.isTransient({ message: run.status.lastError });
+    if (prior.status?.running || prior.status?.scanning || recoverConnection) {
       try {
         if (prior.settings?.serverCopies !== true) throw new Error('Previous local collection is paused. Resume to send this feed to the server.');
         if (!run.feed || (run.feed.done && !Object.keys(run.preparedRecords).length)) throw new Error('Start a Civitai feed to use server collection.');
         if (run.orphaned) throw new Error('Source tab changed after restart. Open the same Civitai page and resume this saved feed.');
-        if (!run.status.stopped) { run.status.running = run.status.scanning = true; driver.enabled = true; driver.phase = 'selected feed'; }
+        if (recoverConnection) {
+          run.status.stopped = false; run.status.stopReason = ''; run.uploadFailures = 0;
+          run.uploadRetryAt = Math.max(run.uploadRetryAt, Date.now() + 5000);
+          run.feed.retryAt = Math.max(run.feed.retryAt || 0, Date.now() + 5000); run.feed.failures = 0;
+        }
+        if (!run.status.stopped) { run.status.running = run.status.scanning = true; driver.enabled = true; driver.phase = recoverConnection ? 'waiting to retry connection' : 'selected feed'; }
       } catch (error) {
         run.status.stopped = true; run.status.stopReason = 'resume-required'; run.status.lastError = error.message;
       }
@@ -637,9 +645,10 @@ async function backgroundFeedPulse(tabId) {
   } catch (error) {
     if (!current()) return;
     feed.failures = (feed.failures || 0) + 1; run.status.lastError = error.message || 'Civitai collection failed.';
-    if ([400, 401, 403, 404, 409].includes(error.status) || (feed.failures >= 3 && ![429,503].includes(error.status))) await stopSession(tabId, 'feed-error', run.status.lastError);
+    const transient = ISSRetryPolicy.isTransient(error);
+    if ([400, 401, 403, 404, 409].includes(error.status) || (feed.failures >= 3 && !transient)) await stopSession(tabId, 'feed-error', run.status.lastError);
     else {
-      const delay = Math.min(300000, Math.max(error.status === 429 ? 60000 : 5000 * 2 ** (feed.failures - 1), error.retryAfterMs || 0));
+      const delay = transient ? ISSRetryPolicy.delay(error) : Math.min(300000, Math.max(5000 * 2 ** (feed.failures - 1), error.retryAfterMs || 0));
       feed.retryAt = Date.now() + delay; currentDriver.phase = run.status.phase = `retry in ${Math.ceil(delay / 1000)}s`; await persistState(run);
     }
     addDebug('feed-error', run.status.lastError);
@@ -854,6 +863,12 @@ async function postCatalog(action, body) {
     notifyStatusChanged(); return result;
   } catch (error) {
     if (['TimeoutError', 'AbortError'].includes(error?.name)) error = Object.assign(new Error(`Shared catalog ${action} request timed out after 25 seconds.`), { status: 0 });
+    else if (!error?.status && ISSRetryPolicy.isTransient(error)) error = Object.assign(new Error(`Shared catalog network connection failed (${action}). Queued work is saved.`), { status: 0 });
+    if (ISSRetryPolicy.isTransient(error)) {
+      error.retryAfterMs = ISSRetryPolicy.delay(error);
+      uploadCooldownUntil = Math.max(uploadCooldownUntil, Date.now() + error.retryAfterMs);
+      nextUploadAt = Math.max(nextUploadAt, uploadCooldownUntil);
+    }
     Object.assign(catalogStatus, { action, lastError: String(error?.message || error), lastStatus: Number(error?.status) || 0,
       retryAt: Math.max(uploadCooldownUntil, Date.now() + Math.max(5000, Number(error?.retryAfterMs) || 0)) });
     notifyStatusChanged(); throw error;

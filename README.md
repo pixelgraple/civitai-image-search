@@ -4,7 +4,7 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.22](https://search-civitai.xyz/downloads/index-civitai-2.8.22.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.23](https://search-civitai.xyz/downloads/index-civitai-2.8.23.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Browsing requires a short SVG CAPTCHA after the preloader; a successful answer unlocks that browser session for one hour across its tabs. No account or contributor key is needed. Extension contributions continue independently of the website CAPTCHA.
 
@@ -13,6 +13,8 @@ The extension supports `civitai.com` and `civitai.red`. The website can be used 
 Version 2.8.21 cleans and bounds optional resource names before submission, including previously queued records. The server applies the same normalization before validation. Invalid records are returned individually, set aside with their original local prompt and rejection evidence, and shown in the invalid-metadata counter; they do not count as accepted or stop other records. Refresh the extension and gallery tabs after updating; resume scans that were already stopped by the older version.
 
 ## Independent reaction backlog
+
+Version 2.8.23 retries temporary network failures automatically after five seconds, preserving prompts, queues and source cursors. The panel shows the retry countdown and identifies shared-catalog connection failures. Existing runs stopped by a connection failure recover on reload when their original tab is still open; manually stopped tabs remain stopped. Required server/Civitai cooldowns and login or permission checks still apply.
 
 Version 2.8.22 keeps excess reaction page lookups and stats updates in a durable local metadata backlog. A full 600-item reaction working set no longer blocks prompt preparation or image submissions. Unavailable pages and stats for images not yet in the library retry individually, allowing other work to continue. The panel and Browsing & activity show pending lookups and saved-backlog counts separately from the shared 600-image collection queue. Existing queued work survives the update. Source concurrency, server cooldowns and the 60-record/three-second upload pacing remain unchanged.
 
@@ -46,7 +48,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.22.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.23.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.

@@ -137,7 +137,7 @@ test('a failed streamed upload retries independently while the full600 queue hol
   assert.equal(h.run('sessions.get(7).feed.cursor'), null);
   assert.equal(h.run('Object.keys(sessions.get(7).preparedRecords).length'), 1);
   assert.ok((await h.message({ type: 'getState' })).status.retryAt > Date.now());
-  h.run('sessions.get(7).uploadRetryAt=0; nextUploadAt=0; collectionClockPulse();');
+  h.run('sessions.get(7).uploadRetryAt=0; uploadCooldownUntil=0; nextUploadAt=0; collectionClockPulse();');
   await until(() => h.run('sessions.get(7).feed.cursor') === 'next', 'retry must free capacity without waiting for the source page to finish');
   await until(() => h.run('sessions.get(7).catalogSyncedIds.length') === 2, 'durable next-page progress does not wait for final submission');
   assert.equal(h.run('sessions.get(7).catalogSyncedIds.length'), 2); assert.equal(h.run('pipelineSnapshot().outstandingTotal'), 599);
@@ -194,7 +194,7 @@ test('upload chunks respect both60 records and the UTF8 request byte budget', as
   const h = await harness(), calls = install(h);
   const records = Array.from({ length: 25 }, (_, index) => ({ ...record(index + 1), prompt: '😀'.repeat(20000) }));
   h.context.bigRecords = records;
-  const result = await h.run('syncCloudCatalogItems(bigRecords)');
+  const result = await h.run('syncCloudCatalogItems(bigRecords,{tabId:7})');
   assert.equal(result.accepted, 25);
   const posts = calls.filter(call => call.url.endsWith('action=images'));
   assert.ok(posts.length >= 3);

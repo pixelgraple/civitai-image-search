@@ -2,6 +2,12 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.23 - Automatic connection recovery
+
+- Retry temporary source/catalog connection failures after five seconds without stopping after three failures. Keep queued prompts and feed cursors.
+- Retry reaction submissions and page lookups independently; show an automatic retry countdown and destination-specific catalog errors.
+- Recover scans previously stopped by connection errors only when their original source tab is still open. Preserve deliberate Stop actions and source/server Retry-After waits.
+
 ## Server — Reaction update contention (2026-10-18)
 
 - Reserve the SQLite writer before reading and merging reaction updates, avoiding immediate WAL read-to-write upgrade failures during image ingestion.

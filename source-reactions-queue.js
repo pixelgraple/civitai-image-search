@@ -169,7 +169,8 @@ globalThis.ISSSourceReactions = (() => {
         retryAt = 0; // Missing images wait individually; existing-image updates keep flowing.
       } catch (cause) {
         lastError = String(cause?.message || cause);
-        retryAt = now() + Math.max(30000, Number(cause?.retryAfterMs) || 0, cause?.status === 429 ? 60000 : 0);
+        retryAt = now() + (globalThis.ISSRetryPolicy?.isTransient(cause) ? ISSRetryPolicy.delay(cause)
+          : Math.max(30000, Number(cause?.retryAfterMs) || 0, cause?.status === 429 ? 60000 : 0));
         error(cause);
       } finally { busy = false; await persist(); schedule(); }
     }

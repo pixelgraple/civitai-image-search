@@ -354,7 +354,8 @@ globalThis.ISSBrowseCollector = (() => {
       saved.lastError = String(error?.message || 'Auto collection failed.').slice(0, 500);
       if (Number.isInteger(tabId)) { tabState(tabId).lastError = saved.lastError; touch(tabId, 'waiting to retry'); }
       if ([401, 403].includes(Number(error?.status))) { saved.suspended = true; deps.notice?.(); }
-      retryAt = Math.max(retryAt, Date.now() + Math.max(30000, Math.min(300000, Number(error?.retryAfterMs) || 30000)));
+      const delay = globalThis.ISSRetryPolicy?.isTransient(error) ? ISSRetryPolicy.delay(error) : Math.max(30000, Number(error?.retryAfterMs) || 30000);
+      retryAt = Math.max(retryAt, Date.now() + delay);
       saved.retryAt = retryAt; await persist(); deps.debug?.('civitai-auto-error', saved.lastError);
     }
     async function pulse() {

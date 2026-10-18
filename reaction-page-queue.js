@@ -75,7 +75,8 @@ globalThis.ISSReactionPages = (() => {
         lastError = '';
       } catch (error) {
         if (pending.get(item.id) !== item) return;
-        item.attempts++; item.retryAt = now() + Math.max(30000, Number(error?.retryAfterMs) || Math.min(300000, 15000 * 2 ** Math.min(5, item.attempts)));
+        item.attempts++; item.retryAt = now() + (globalThis.ISSRetryPolicy?.isTransient(error) ? ISSRetryPolicy.delay(error)
+          : Math.max(30000, Number(error?.retryAfterMs) || Math.min(300000, 15000 * 2 ** Math.min(5, item.attempts))));
         lastError = String(error?.message || error); report(error);
         // Unavailable pages wait on disk, freeing the working set for other IDs.
         if (backlog) { await backlog.put(item); if (pending.get(item.id) === item) pending.delete(item.id); }

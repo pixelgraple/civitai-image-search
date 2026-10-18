@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.22', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.23', ROOT_ID = '__iss_panel_root';
   const previousRoot = document.getElementById(ROOT_ID);
   if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
     try { window.__ISS_TOGGLE_PANEL(); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
@@ -151,6 +151,9 @@
     $('stop').disabled = !busy && !autoRunning; $('resume').hidden = (!state?.canResume && !browse?.tabPaused) || busy; $('resume').disabled = busy;
     $('status').textContent = message || s.lastError || browse?.lastError || (s.running ? `Feed page ${count(state?.feed?.pages || s.driverBatch || 1)} · ${state?.driver?.phase || s.driverPhase || 'indexing prompts'}` : browse?.tabPaused ? 'Collection is stopped for this tab. Resume tab to continue.' : complete ? `This tab’s feed reached the end.${autoRunning ? ' Automatic collection stays on for new gallery images.' : ' Scan this tab to start again.'}` : autoRunning ? 'Visible images are collected as you browse. Choose Scan this tab to scroll this gallery automatically. Other tabs keep manual scrolling.' : state?.canResume ? 'This tab’s feed is paused. Resume its saved position, or start a fresh scan here.' : s.stopped ? 'This tab’s scan stopped. Start a fresh scan from the selected page.' : 'Scan this page’s selected feed. You can run other Civitai tabs at the same time. Keep each source tab open.');
     $('status').classList.toggle('error', messageError || !!s.lastError || !!browse?.lastError);
+    const retrySeconds = Math.max(0, Math.ceil((Math.max(s.retryAt || 0, browse?.retryAt || 0, browse?.catalog?.retryAt || 0, source?.blockedUntil || 0) - Date.now()) / 1000));
+    if ((s.lastError || browse?.lastError) && !browse?.tabPaused && !browse?.suspended && !source?.authStatus && (s.running || autoRunning))
+      $('status').textContent += retrySeconds ? ` Retrying automatically in ${retrySeconds}s.` : ' Retrying automatically when a request slot is available.';
     const remaining = Math.max(0, Math.ceil((Math.max(source?.blockedUntil || 0, browse?.retryAt || 0) - Date.now()) / 1000));
     const sourceActive = Number(source?.activeCount ?? (source?.active ? 1 : 0)), sourceQueued = Number(source?.queued || 0);
     const catalogWait = Math.max(0, Math.ceil((Number(browse?.catalog?.retryAt || 0) - Date.now()) / 1000));
