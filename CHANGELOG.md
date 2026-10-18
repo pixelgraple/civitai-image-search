@@ -2,6 +2,14 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## Website - Discovery performance (2026-10-18)
+
+- Add a covering snapshot index for preview availability and PG-13 checks on Models, LoRAs, Creators, Recipes, and Prompt Explorer.
+- Look up selected discovery and popular preview IDs directly instead of scanning the downloaded-image status index. Retain current safety and exclusion checks.
+- Keep profile connection reads bounded to a labeled 64-image sample and remove a redundant distinct pass. Profile totals still cover the full snapshot.
+- End stalled directory requests after 20 seconds with a working Retry button.
+- Include isolated query/safety regression checks and timeout/navigation UI checks. Existing snapshots need the covering index before the new reader is deployed; see the README.
+
 ## 2.8.23 - Automatic connection recovery
 
 - Retry temporary source/catalog connection failures after five seconds without stopping after three failures. Keep queued prompts and feed cursors.

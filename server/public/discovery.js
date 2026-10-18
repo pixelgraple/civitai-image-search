@@ -53,7 +53,7 @@
     const detail=item.kind==='recipes'?(item.data.loras||[]).slice(0,3).map(esc).join(' · '):'Explore examples and related resources';
     return '<article class="popular-card"><a class="popular-card-link" href="'+esc(url(item.kind,item.key))+'"><div class="popular-card-images">'+thumbs.join('')+'</div><div class="popular-card-body"><span class="popular-card-kind">'+esc(item.kind==='phrases'?'Positive prompt phrase':item.kind)+'</span><h3>'+esc(name)+'</h3><div class="popular-primary"><strong>'+num(item.imageCount)+'</strong><span>indexed images</span></div><p class="discovery-card-description">'+detail+'</p><div class="popular-card-stats"><span>'+num(item.reactions)+' recorded Civitai reactions</span></div><span class="popular-card-action">Explore '+(item.kind==='recipes'?'recipe':'profile')+' ↗</span></div></a></article>';
   }
-  function profile(item,related) {
+  function profile(item,related,sampleLimit) {
     const recipe=item.kind==='recipes';
     const resources=recipe?'<div class="profile-resources"><h3>Checkpoint</h3><a href="'+esc(url('models',item.data.model))+'">'+esc(item.data.model)+'</a><h3>LoRAs</h3>'+(item.data.loras||[]).map(n=>'<a href="'+esc(url('loras',n))+'">'+esc(n)+'</a>').join('')+'</div>':'';
     const text=recipe?'These images share this checkpoint and LoRA set. Weights and other generation settings may differ. Open an example to read its captured prompt and available weights.':'Explore indexed images and common resources associated with this '+(item.kind==='creators'?'creator':item.kind==='phrases'?'prompt phrase':item.kind==='tags'?'source tag':'resource')+'.';
@@ -61,7 +61,7 @@
     html+='<h2>Image examples</h2><div class="profile-images">'+(item.previewIds||[]).map(id=>'<a class="profile-image" href="/?'+esc(new URLSearchParams({image:id,pg13:safe()?'1':'0'}).toString())+'" aria-label="Open image '+esc(id)+'">'+imageMarkup(id)+'</a>').join('')+'</div>';
     if (!(item.previewIds||[]).length) html+='<p class="discovery-note">No stored previews are available yet. Browse all images to read indexed prompts.</p>';
     const names={models:'Common checkpoints',loras:'Common LoRAs',creators:'Creators',recipes:'Resource combinations',tags:'Common source tags',phrases:'Common prompt phrases'};
-    html+='<h2>Explore connections</h2><p class="discovery-note">Co-occurrences in up to 1,000 indexed examples. Counts here describe this sample, not all of Civitai. Sharing a resource does not guarantee a particular result.</p><div class="discovery-facets">';
+    html+='<h2>Explore connections</h2><p class="discovery-note">Co-occurrences in up to '+num(sampleLimit)+' indexed examples. Counts here describe this sample, not all of Civitai. Sharing a resource does not guarantee a particular result.</p><div class="discovery-facets">';
     for (const [k,list] of Object.entries(related||{})) {
       if (!list.length) continue;
       html+='<section class="discovery-facet"><h3>'+esc(names[k]||k)+'</h3>'+list.map(e=>'<a href="'+esc(url(e.kind,e.key))+'"><span>'+esc(e.name)+'</span><b>'+num(e.sampleUses)+'</b></a>').join('')+'</section>';
@@ -88,6 +88,8 @@
   async function load(push=false) {
     sync();if(!access.isVerified())return;
     const turn=++ticket;controller?.abort();controller=new AbortController();clear();
+    const requestController=controller;let timedOut=false;
+    const timeout=setTimeout(()=>{timedOut=true;requestController.abort();},20000);
     $('directoryResults').setAttribute('aria-busy','true');$('directoryStatus').textContent='Loading '+titles[kind].toLowerCase()+'…';
     if(push)history.pushState(null,'',url(kind,key,{...(query?{q:query}:{}),page:String(page)}));
     try {
@@ -99,16 +101,16 @@
       page=data.page;
       $('health').textContent='Updated '+new Date(data.generatedAt*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
       $('directoryStatus').textContent=key?(data.items.length?'Profile · '+(safe()?'PG-13':'full')+' library':'This profile is not available under these filters.'):(num(data.total)+' entries · page '+page+' of '+Math.max(1,data.pages));
-      if(key&&data.items.length) $('directoryProfile').innerHTML=profile(data.items[0],data.related);
+      if(key&&data.items.length) $('directoryProfile').innerHTML=profile(data.items[0],data.related,data.sampleLimit);
       else if(!key)$('directoryResults').innerHTML=data.items.map(card).join('');
       if(!data.items.length)$('directoryResults').innerHTML='<div class="popular-empty"><h3>No matches in this view</h3><p>Try another name or return to the directory. New profiles appear as metadata is indexed.</p><a href="'+esc(url())+'">Browse directory</a></div>';
       if(!key&&data.pages>1)$('directoryPagination').innerHTML='<button type="button" data-page="'+(page-1)+'"'+(page<=1?' disabled':'')+'>← Previous</button><span>Page '+page+' / '+data.pages+'</span><button type="button" data-page="'+(page+1)+'"'+(page>=data.pages?' disabled':'')+'>Next →</button>';
       mount();
     }catch(error){
-      if(turn!==ticket||!access.isVerified()||['AbortError','AccessRequiredError'].includes(error.name))return;
-      clear();$('directoryStatus').textContent=error.message;
+      if(turn!==ticket||!access.isVerified()||error.name==='AccessRequiredError'||(error.name==='AbortError'&&!timedOut))return;
+      clear();$('directoryStatus').textContent=timedOut?'Loading took too long. Please retry.':error.message;
       $('directoryResults').innerHTML='<div class="popular-empty"><h3>Discovery is temporarily unavailable</h3><button type="button" id="directoryRetry">Retry</button></div>';
-    }finally{if(turn===ticket)$('directoryResults').setAttribute('aria-busy','false');}
+    }finally{clearTimeout(timeout);if(turn===ticket)$('directoryResults').setAttribute('aria-busy','false');}
   }
   $('directorySearch').addEventListener('submit',e=>{e.preventDefault();query=$('directoryQuery').value.trim();page=1;load(true);});
   $('customPhraseForm').addEventListener('submit',e=>{

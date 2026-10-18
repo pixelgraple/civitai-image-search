@@ -50,7 +50,7 @@ try {
   if ($count%5000===0) { $out->commit();$out->beginTransaction(); }
  }
  $rows->closeCursor();$source=null;$out->commit();unset($seen);
- $out->exec('CREATE INDEX member_image ON members(image_id,kind,key); CREATE INDEX image_safe ON image_meta(safe,image_id);');
+ $out->exec('CREATE INDEX member_image ON members(image_id,kind,key); CREATE INDEX image_safe ON image_meta(safe,image_id); CREATE INDEX image_preview_status ON image_meta(image_id,safe,ready);');
  foreach ([0,1] as $scope) {
   $out->exec("INSERT INTO entries SELECT $scope,m.kind,m.key,l.name,l.search_name,l.payload,COUNT(*),SUM(i.score) FROM members m JOIN image_meta i ON i.image_id=m.image_id JOIN labels l ON l.kind=m.kind AND l.key=m.key ".($scope?'WHERE i.safe=1 AND l.safe_name=1 ':'')."GROUP BY m.kind,m.key");
  }

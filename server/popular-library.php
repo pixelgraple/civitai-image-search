@@ -113,11 +113,11 @@ function popular_response(string $type,bool $safe): array {
     $previews=[];
     if ($ids) {
         $pdo=popular_read_database();
-        $sql='SELECT i.image_id,i.creator_name,i.model_name,i.loras_json FROM images i
+        $sql='SELECT i.image_id,i.creator_name,i.model_name,i.loras_json FROM images i INDEXED BY sqlite_autoindex_images_1
             WHERE i.image_id IN ('.implode(',',array_fill(0,count($ids),'?')).')
             AND i.download_status=\'ready\' AND COALESCE(i.file_path,\'\')<>\'\'
             AND NOT EXISTS (SELECT 1 FROM image_collection_skips sk WHERE sk.image_id=i.image_id)';
-        if ($safe) $sql.=' AND EXISTS (SELECT 1 FROM image_pg13_safety_v2 s WHERE s.image_id=i.image_id AND s.pg13_safe=1)';
+        if ($safe) $sql.=' AND EXISTS (SELECT 1 FROM image_pg13_safety_v2 s INDEXED BY image_pg13_safety_v2_safe WHERE s.image_id=i.image_id AND s.pg13_safe=1)';
         $stmt=$pdo->prepare($sql); $stmt->execute(array_values($ids));
         foreach ($stmt as $row) $previews[(string)$row['image_id']]=$row;
     }

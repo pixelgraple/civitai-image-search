@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__.'/popular-library.php';
 const DISCOVERY_VERSION=1;
+const DISCOVERY_PROFILE_SAMPLE_LIMIT=64;
 function discovery_path(): string { return dirname(config()['database_path']).'/discovery-cache/catalog-v1.sqlite'; }
 function discovery_db(): PDO {
     $path=discovery_path();
@@ -39,8 +40,10 @@ function discovery_previews(array $ids,bool $safe): array {
     $ids=array_values(array_unique(array_filter(array_map('strval',$ids),'valid_image_id')));
     if (!$ids) return [];
     $pdo=popular_read_database();
-    $sql="SELECT image_id FROM images i WHERE image_id IN (".implode(',',array_fill(0,count($ids),'?')).") AND download_status='ready' AND COALESCE(file_path,'')<>'' AND NOT EXISTS(SELECT 1 FROM image_collection_skips sk WHERE sk.image_id=i.image_id)";
-    if ($safe) $sql.=' AND EXISTS(SELECT 1 FROM image_pg13_safety_v2 s WHERE s.image_id=i.image_id AND s.pg13_safe=1)';
+    // This is a bounded list of preview IDs. A status-index plan otherwise
+    // walks almost every stored image before applying the IN predicate.
+    $sql="SELECT image_id FROM images i INDEXED BY sqlite_autoindex_images_1 WHERE image_id IN (".implode(',',array_fill(0,count($ids),'?')).") AND download_status='ready' AND COALESCE(file_path,'')<>'' AND NOT EXISTS(SELECT 1 FROM image_collection_skips sk WHERE sk.image_id=i.image_id)";
+    if ($safe) $sql.=' AND EXISTS(SELECT 1 FROM image_pg13_safety_v2 s INDEXED BY image_pg13_safety_v2_safe WHERE s.image_id=i.image_id AND s.pg13_safe=1)';
     $s=$pdo->prepare($sql); $s->execute($ids); $allowed=array_fill_keys(array_column($s->fetchAll(),'image_id'),true);
     return array_values(array_filter($ids,static fn($id)=>isset($allowed[$id])));
 }
@@ -64,7 +67,9 @@ function discovery_request(): array {
     foreach ($args as $i=>$v) $s->bindValue($i+1,$v);
     $s->bindValue(count($args)+1,$limit,PDO::PARAM_INT); $s->bindValue(count($args)+2,($page-1)*$limit,PDO::PARAM_INT); $s->execute();
     $items=array_map('discovery_entry',$s->fetchAll()); $allIds=[];
-    $preview=$db->prepare('SELECT m.image_id FROM members m JOIN image_meta i ON i.image_id=m.image_id WHERE m.kind=? AND m.key=? AND (CAST(? AS INTEGER)=0 OR i.safe=1) AND i.ready=1 LIMIT ?');
+    // Keep the readiness/safety lookup inside one compact covering index.
+    // The old primary-key lookup needed a scattered table read per member.
+    $preview=$db->prepare('SELECT m.image_id FROM members m JOIN image_meta i INDEXED BY image_preview_status ON i.image_id=m.image_id WHERE m.kind=? AND m.key=? AND (CAST(? AS INTEGER)=0 OR i.safe=1) AND i.ready=1 LIMIT ?');
     foreach ($items as &$item) {
         $preview->bindValue(1,$kind); $preview->bindValue(2,$item['key']); $preview->bindValue(3,$scope,PDO::PARAM_INT); $preview->bindValue(4,$key!==''?24:3,PDO::PARAM_INT); $preview->execute();
         $item['previewIds']=array_map('strval',array_column($preview->fetchAll(),'image_id')); $allIds=array_merge($allIds,$item['previewIds']);
@@ -75,8 +80,9 @@ function discovery_request(): array {
     $related=[];
     if ($key!=='' && $items) {
         // Bound profile aggregation to a labeled sample, independent of catalog size.
-        $s=$db->prepare('SELECT DISTINCT x.kind,x.key,COUNT(*) uses FROM members x
-          JOIN (SELECT m.image_id FROM members m JOIN image_meta i ON i.image_id=m.image_id WHERE m.kind=? AND m.key=? AND (CAST(? AS INTEGER)=0 OR i.safe=1) ORDER BY m.image_id DESC LIMIT 1000) sample ON sample.image_id=x.image_id
+        $s=$db->prepare('SELECT x.kind,x.key,COUNT(*) uses FROM
+          (SELECT m.image_id FROM members m JOIN image_meta i INDEXED BY image_preview_status ON i.image_id=m.image_id WHERE m.kind=? AND m.key=? AND (CAST(? AS INTEGER)=0 OR i.safe=1) ORDER BY m.image_id DESC LIMIT '.DISCOVERY_PROFILE_SAMPLE_LIMIT.') sample
+          CROSS JOIN members x INDEXED BY member_image ON sample.image_id=x.image_id
           WHERE x.kind IN (\'models\',\'loras\',\'creators\',\'tags\',\'phrases\',\'recipes\') GROUP BY x.kind,x.key ORDER BY uses DESC LIMIT 180');
         $s->execute([$kind,lower_text($key),$scope]);
         $entry=$db->prepare('SELECT * FROM entries WHERE scope=? AND kind=? AND key=?');
@@ -88,7 +94,7 @@ function discovery_request(): array {
         }
     }
     $meta=$db->query('SELECT * FROM metadata')->fetch();
-    return ['ok'=>true,'items'=>$items,'total'=>$total,'page'=>$page,'pages'=>$pages,'kind'=>$kind,'pg13'=>$safe,'related'=>$related,'sampleLimit'=>1000,'generatedAt'=>(int)$meta['built_at']];
+    return ['ok'=>true,'items'=>$items,'total'=>$total,'page'=>$page,'pages'=>$pages,'kind'=>$kind,'pg13'=>$safe,'related'=>$related,'sampleLimit'=>DISCOVERY_PROFILE_SAMPLE_LIMIT,'generatedAt'=>(int)$meta['built_at']];
 }
 function discovery_similar(string $id,bool $safe): array {
     $db=discovery_db(); $scope=(int)$safe;

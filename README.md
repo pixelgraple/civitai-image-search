@@ -174,7 +174,7 @@ Deployment requires adding **popular.php** to the site's Nginx PHP page allowlis
 The main navigation includes **Models**, **LoRAs**, **Creators**, **Recipes**, **Prompt Explorer**, and **Discover**.
 
 - Model, LoRA and creator directories support name searches and pagination. Each profile has image examples, an exact gallery link and common resource/tag connections.
-- Profile connections describe a bounded sample of up to 1,000 indexed images. Their sample counts are labeled separately from whole-profile totals.
+- Profile connections describe a bounded sample of up to 64 indexed images. Their sample counts are labeled separately from whole-profile totals.
 - Recipes group recorded checkpoint names and complete LoRA-name sets. The directory shows combinations with at least two examples; individual recipe profiles can contain one. Weights may vary between examples. The image viewer displays only LoRA weights explicitly captured in the prompt, labeling zero weights disabled.
 - Prompt Explorer covers common descriptive phrases and captured source tags. Its custom phrase form can search any phrase within an optional checkpoint. Quoted phrases stay together in positive and excluded searches.
 - **More like this** in the image viewer finds up to 240 stored candidates using rare shared tags, common descriptive prompt phrases and LoRAs, with a bonus for the same checkpoint. It is metadata similarity, not a visual model.
@@ -184,6 +184,10 @@ The main navigation includes **Models**, **LoRAs**, **Creators**, **Recipes**, *
 PG-13 is enabled by default across these pages. Cached previews are checked against current availability, collection skips and PG-13 decisions before they are returned. Direct image and similar-image searches also enforce the live filter. Source counts and metadata may be incomplete.
 
 Discovery uses a separate private SQLite snapshot at **/data/civitai/database/discovery-cache/catalog-v1.sqlite**. **civitai-discovery.timer** refreshes it every 15 minutes through **discovery-rebuild.php**; rebuilds read the catalog, take an exclusive rebuild lock and publish by atomic rename. The web API reads this snapshot and retains the existing CAPTCHA and search quota. Snapshots older than one day or with a mismatched policy version are rejected.
+
+Directory previews use the snapshot's covering `image_preview_status(image_id,safe,ready)` index. Current availability, collection exclusions and PG-13 decisions are checked against the live catalog by exact image IDs; discovery and popular pages must not scan all downloaded images for a small preview list. Profile connections use a labeled sample of up to 64 images; overall profile image/reaction totals still cover the full snapshot. The directory shows a retry action after a 20-second request timeout.
+
+For an existing installation, deploy the updated rebuild worker and rebuild the snapshot **before** enabling the updated discovery reader. Alternatively, while holding `discovery-cache/rebuild.lock`, add `CREATE INDEX IF NOT EXISTS image_preview_status ON image_meta(image_id,safe,ready)` to the existing snapshot in a normal SQLite transaction. Future rebuilds create this index automatically. The live catalog's existing `image_pg13_safety_v2_safe` index is also required. Do not change the safety policy or disable verification to improve response time.
 
 Deployment adds **discovery.php** and **discover.php** to the existing Nginx PHP page allowlist. Keep **library-nav.php** an include only. Install the discovery service/timer and complete the first snapshot before publishing the navigation. App files stay under **/www/wwwroot/search-civitai.xyz**; the database and snapshot stay outside the public web directory.
 
