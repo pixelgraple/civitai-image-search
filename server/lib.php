@@ -19,10 +19,21 @@ function db(): PDO {
     if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) throw new RuntimeException('Could not create database directory.');
     $pdo = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $pdo->sqliteCreateFunction('catalog_lower', static fn($value)=>lower_text((string)$value), 1, PDO::SQLITE_DETERMINISTIC);
-    $pdo->exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;');
+    $pdo->sqliteCreateFunction('catalog_has_pg13_term', static fn($value)=>catalog_has_pg13_term($value), 1, PDO::SQLITE_DETERMINISTIC);
+    // WAL is initialized during catalog setup; do not renegotiate it on every request while the image-copy worker is writing.
+    $pdo->exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     $schema=file_get_contents(__DIR__.'/schema.sql');
     if ($schema===false) throw new RuntimeException('Database schema is unavailable.');
     $pdo->exec($schema);
+    // Materialized safety decisions keep the default PG-13 search fast. The
+    // decision is recomputed when a record is ingested and backfilled for the
+    // existing catalog; the prompt text never has to be regex-scanned during
+    // every paginated search.
+    $pdo->exec('CREATE TABLE IF NOT EXISTS image_pg13_safety_v2 (image_id TEXT PRIMARY KEY REFERENCES images(image_id) ON DELETE CASCADE, pg13_safe INTEGER NOT NULL CHECK(pg13_safe IN (0,1)), checked_at TEXT NOT NULL)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS image_pg13_safety_v2_safe ON image_pg13_safety_v2(pg13_safe,image_id)');
+    $pdo->exec('CREATE TRIGGER IF NOT EXISTS image_pg13_inputs_changed_v2 AFTER UPDATE OF prompt,tags_json,model_name,loras_json ON images
+        WHEN NEW.prompt IS NOT OLD.prompt OR NEW.tags_json IS NOT OLD.tags_json OR NEW.model_name IS NOT OLD.model_name OR NEW.loras_json IS NOT OLD.loras_json
+        BEGIN DELETE FROM image_pg13_safety_v2 WHERE image_id=NEW.image_id; END');
     $columns=array_column($pdo->query('PRAGMA table_info(images)')->fetchAll(),'name');
     foreach (['reactions_json'=>"TEXT NOT NULL DEFAULT '{}'",'image_width'=>'INTEGER NOT NULL DEFAULT 0','image_height'=>'INTEGER NOT NULL DEFAULT 0','creator_name'=>"TEXT NOT NULL DEFAULT ''",'source_page_url'=>"TEXT NOT NULL DEFAULT ''"] as $column=>$definition) {
         if (in_array($column,$columns,true)) continue;
@@ -42,6 +53,9 @@ function db(): PDO {
 }
 
 function lower_text(string $value): string { return function_exists('mb_strtolower') ? mb_strtolower($value,'UTF-8') : strtolower($value); }
+
+require_once __DIR__.'/pg13-policy.php';
+
 function cut_text(string $value,int $length): string { return function_exists('mb_substr') ? mb_substr($value,0,$length,'UTF-8') : substr($value,0,$length); }
 function text_length(string $value): int { return function_exists('mb_strlen') ? mb_strlen($value,'UTF-8') : (int)preg_match_all('/./us',$value); }
 
@@ -54,18 +68,62 @@ function json_response(array $body, int $status = 200): never {
 }
 
 function cors_headers(): void {
-    header('Access-Control-Allow-Origin: *');
+    $origin=(string)($_SERVER['HTTP_ORIGIN']??'');
+    $site=strtolower((string)($_SERVER['HTTP_SEC_FETCH_SITE']??''));
+    $allowed=in_array($origin,['https://search-civitai.xyz','https://civitai.com','https://civitai.red','https://www.civitai.com','https://www.civitai.red'],true)
+        || preg_match('~\Achrome-extension://[a-p]{32}\z~D',$origin)===1
+        || preg_match('~\Amoz-extension://[a-f0-9-]{36}\z~D',$origin)===1;
+    if (($origin!=='' && !$allowed) || ($origin==='' && $site==='cross-site')) {
+        json_response(['ok'=>false,'error'=>'This browser origin cannot submit to the catalog.'],403);
+    }
+    header('Access-Control-Allow-Origin: '.($origin!==''?$origin:'*'));
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
     header('Access-Control-Allow-Headers: Authorization, Content-Type');
     header('Vary: Origin');
 }
 
 function json_input(): array {
-    $raw = file_get_contents('php://input');
+    $type=strtolower(trim(explode(';',(string)($_SERVER['CONTENT_TYPE']??''))[0]));
+    if ($type!=='application/json') json_response(['ok'=>false,'error'=>'Submit an application/json request.'],415);
+    if ((int)($_SERVER['CONTENT_LENGTH']??0)>1048576) json_response(['ok'=>false,'error'=>'Request body too large.'],413);
+    $raw = file_get_contents('php://input',false,null,0,1048577);
     if ($raw === false || strlen($raw) > 1048576) json_response(['ok'=>false,'error'=>'Request body too large.'], 413);
-    $data = json_decode($raw, true);
-    if (!is_array($data)) json_response(['ok'=>false,'error'=>'Expected a JSON object.'], 400);
+    $data = json_decode($raw, true, 32);
+    if (!is_array($data) || array_is_list($data)) json_response(['ok'=>false,'error'=>'Expected a JSON object.'], 400);
     return $data;
+}
+
+/** Optional source labels are bounded before validation, including old clients. */
+function normalize_ingest_names(mixed $item): mixed {
+    if (!is_array($item) || array_is_list($item)) return $item;
+    foreach (['tags','loras'] as $key) {
+        if (isset($item[$key]) && is_array($item[$key]) && array_is_list($item[$key]))
+            $item[$key]=normalize_strings($item[$key]);
+    }
+    return $item;
+}
+class InvalidIngestRecord extends InvalidArgumentException {
+    public function __construct(string $message,public readonly string $field='record') { parent::__construct($message); }
+}
+/** Invalid record metadata is isolated; request/authentication limits stay enforced. */
+function validate_ingest_item(mixed $item): void {
+    if (!is_array($item) || array_is_list($item)) throw new InvalidIngestRecord('Each record must be an object.');
+    foreach (['prompt'=>20000,'negativePrompt'=>10000,'modelName'=>300,'creatorName'=>200,'downloadUrl'=>2048,'sourceUrl'=>2048,'capturedPageUrl'=>2048] as $key=>$limit) {
+        if (!isset($item[$key])) continue;
+        if (!is_string($item[$key]) || strlen($item[$key])>$limit*4 || !preg_match('//u',$item[$key]) || str_contains($item[$key],"\0") || text_length($item[$key])>$limit)
+            throw new InvalidIngestRecord('Invalid or oversized record field: '.$key.'.',$key);
+    }
+    foreach (['tags','loras'] as $key) {
+        if (!isset($item[$key])) continue;
+        if (!is_array($item[$key]) || !array_is_list($item[$key]) || count($item[$key])>200) throw new InvalidIngestRecord('Use a list of at most 200 '.$key.'.',$key);
+        foreach ($item[$key] as $value) {
+            if (is_array($value)) $value=$value['name']??null;
+            if (!is_string($value) || strlen($value)>800 || !preg_match('//u',$value) || str_contains($value,"\0") || text_length($value)>200)
+                throw new InvalidIngestRecord('Invalid name in '.$key.'.',$key);
+        }
+    }
+    foreach (['width','height'] as $key) if (isset($item[$key]) && !is_int($item[$key]) && !is_float($item[$key]) && !is_string($item[$key]))
+        throw new InvalidIngestRecord('Invalid image dimension.',$key);
 }
 
 function normalize_strings(mixed $value, int $limit = 200): array {
@@ -74,6 +132,8 @@ function normalize_strings(mixed $value, int $limit = 200): array {
     foreach ($value as $item) {
         if (is_array($item)) $item = $item['name'] ?? '';
         if (!is_string($item)) continue;
+        if (!preg_match('//u',$item)) continue;
+        $item=preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u','',$item)??'';
         $item = trim(preg_replace('/\s+/u', ' ', $item) ?? '');
         if ($item === '') continue;
         $out[] = cut_text($item, 200);
@@ -161,7 +221,7 @@ function update_source_reactions(PDO $pdo,array $items): array {
             if (!$row) { $missingIds[]=$id; continue; }
             $prior=normalize_reactions(json_decode($row['reactions_json'],true));
             $merged=array_replace($prior,$record['reactions']);
-            $creator=$record['creatorName']!=='' ? $record['creatorName'] : (string)$row['creator_name']; $accepted++;
+            $creator=(string)$row['creator_name']!=='' ? (string)$row['creator_name'] : $record['creatorName']; $accepted++;
             $pageUrl=normalize_captured_page_url($row['source_page_url']??null,$id) ?: $record['capturedPageUrl'];
             if ($merged==$prior && $creator===(string)$row['creator_name'] && $pageUrl===(string)$row['source_page_url']) continue;
             $update->execute([json_encode((object)$merged,JSON_THROW_ON_ERROR),$creator,$pageUrl,gmdate('c'),$id]); $updated++;
@@ -518,7 +578,7 @@ function classify_style(string $prompt, string $model, array $loras, array $tags
 }
 
 function safe_image_url(mixed $value): ?string {
-    if (!is_string($value) || strlen($value) > 2048) return null;
+    if (!is_string($value) || strlen($value) > 2048 || preg_match('/[\x00-\x20\x7f\\\\]/',$value) || !preg_match('//u',$value)) return null;
     $url = parse_url($value);
     if (!$url || ($url['scheme'] ?? '') !== 'https' || !in_array(strtolower($url['host'] ?? ''), ['image.civitai.com','imagecache.civitai.com','blobs.civitai.com','blobs-b2.civitai.com'], true)) return null;
     if (isset($url['user']) || isset($url['pass']) || isset($url['port'])) return null;

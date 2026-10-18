@@ -7,8 +7,10 @@ catch (Throwable $error) {
     error_log('Civitai media access gate unavailable.');
     header('Cache-Control: no-store'); http_response_code(503); exit;
 }
-$id=(string)($_GET['id']??''); $variant=(string)($_GET['variant']??'original');
-$previewWidth=(string)($_GET['w']??'720');
+if (!in_array($_SERVER['REQUEST_METHOD']??'',['GET','HEAD'],true)) { header('Allow: GET, HEAD'); http_response_code(405); exit; }
+$id=$_GET['id']??''; $variant=$_GET['variant']??'original';
+$previewWidth=$_GET['w']??'720';
+if (!is_string($id) || !is_string($variant) || !is_string($previewWidth)) { http_response_code(404); exit; }
 if (!preg_match('/^\d{1,20}$/',$id) || !in_array($variant,['original','thumb'],true) ||
     ($variant==='thumb' && !in_array($previewWidth,['320','720'],true))) { http_response_code(404); exit; }
 try {

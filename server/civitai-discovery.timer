@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh discovery every 15 minutes
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=15min
+RandomizedDelaySec=45s
+Unit=civitai-discovery.service
+[Install]
+WantedBy=timers.target

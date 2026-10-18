@@ -14,8 +14,14 @@
   const reactionTypes = [['likeCount', '👍', 'likes'], ['heartCount', '❤️', 'hearts'], ['laughCount', '😂', 'laughs'], ['cryCount', '😭', 'cries'], ['buzzCount', '⚡', 'Buzz']];
   const communityTypes = [['upvote', '↑', 'Upvote'], ['heart', '❤️', 'Love'], ['laugh', '😂', 'Laugh'], ['wow', '😮', 'Wow']];
   const layoutPreview = new URL(location.href).searchParams.get('preview') === 'layout';
-  const defaultFilters = { q: '', qMode: 'all', qScope: 'prompt_tags', tag: '', tagMode: 'all', tagMatch: 'list', model: '', lora: '', creator: '', creatorMatch: 'contains', category: '', sort: 'newest' };
-  const filterControls = { q: 'query', qMode: 'qMode', qScope: 'qScope', tag: 'tag', tagMode: 'tagMode', model: 'model', lora: 'lora', creator: 'creator', category: 'category', sort: 'sort' };
+  const discoveryMode=location.pathname.endsWith('/discover.php');
+  const shuffleSeed=()=>String(1+(crypto.getRandomValues(new Uint32Array(1))[0]%2147483646));
+  const discoveryKeys=['exclude','orientation','minWidth','minHeight','maxWidth','maxHeight','minReactions','ready'];
+  let discoveryContext={recipe:'',similar:'',image:'',seed:shuffleSeed()};
+  let autoOpenImage=false;
+  const defaultFilters = { exclude:'',orientation:'',minWidth:'',minHeight:'',maxWidth:'',maxHeight:'',minReactions:'',ready:'0',recipe:'',similar:'',image:'',seed:discoveryContext.seed, q: '', qMode: 'all', qScope: 'prompt_tags', tag: '', tagMode: 'all', tagMatch: 'list', model: '', modelMatch: 'contains', lora: '', loraMatch: 'contains', creator: '', creatorMatch: 'contains', category: '', source: '', sort: discoveryMode?'random':'newest', pg13: true };
+  const filterControls = { q: 'query', qMode: 'qMode', qScope: 'qScope', tag: 'tag', tagMode: 'tagMode', model: 'model', lora: 'lora', creator: 'creator', category: 'category', source: 'source', sort: 'sort' };
+  discoveryKeys.forEach(key=>{filterControls[key]=key;});
   const state = { page: 1, pages: 1, limit: layoutPreview ? 48 : 42, total: 0, items: [], filters: { ...defaultFilters }, pendingFilters: null, request: 0, controller: null, viewerIndex: -1, viewerBusy: false, returnFocus: null, reactionRequest: 0, reactionController: null, community: null };
   const reactionWrites = new Map();
 
@@ -34,7 +40,7 @@
   function sourceUrl(row) { return `${capturedOrigin(row) || 'https://civitai.red'}/images/${encodeURIComponent(row.id)}`; }
   function creatorLibraryUrl(name) {
     const url = new URL('./', location.href);
-    url.search = new URLSearchParams({ creator: name, creatorMatch: 'exact', sort: state.filters.sort }).toString();
+    url.search = new URLSearchParams({ creator: name, creatorMatch: 'exact', sort: state.filters.sort,pg13:state.filters.pg13?'1':'0' }).toString();
     url.hash = '';
     return url.href;
   }
@@ -89,7 +95,8 @@
     const preview = mediaUrl(row.previewUrl, row.id);
     const label = `View image ${row.id}${row.modelName ? ` · ${row.modelName}` : ''}`;
     const image = preview ? `<img data-preview="${esc(preview)}"${dimensions(row)} decoding="async" alt="Indexed image ${esc(row.id)}">` : `<span class="image-fallback"><span class="fallback-symbol" aria-hidden="true">▧</span><b>${esc(statusText(row))}</b><small>Prompt and details are available</small></span>`;
-    return `<article class="image-card"><div class="card-media"><button type="button" class="gallery-open" data-index="${index}" aria-label="${esc(label)}">${image}</button><a class="source-link" href="${esc(sourceUrl(row))}" target="_blank" rel="noopener noreferrer" aria-label="Open image ${esc(row.id)} on Civitai" title="Open on Civitai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l2-2"></path></svg></a><span class="image-category category-${esc(row.category || 'uncertain')}">${esc(styleNames[row.category] || 'Uncertain')}</span></div><div class="reaction-strip"><span class="card-community-upvotes" data-community-id="${esc(row.id)}" title="${format(row.communityReactions?.upvote)} community upvotes on Search Civitai" aria-label="${format(row.communityReactions?.upvote)} community upvotes"><span aria-hidden="true">↑</span><b>${format(row.communityReactions?.upvote)}</b></span><span class="card-source-reactions" aria-label="Read-only Civitai source reactions">${reactionMarkup(row)}</span></div></article>`;
+    const sourceLabel = row.sourceDomain === 'civitai.com' ? 'civitai.com' : row.sourceDomain === 'civitai.red' ? 'civitai.red' : 'source unknown';
+    return `<article class="image-card"><div class="card-media"><button type="button" class="gallery-open" data-index="${index}" aria-label="${esc(label)}">${image}</button><a class="source-link" href="${esc(sourceUrl(row))}" target="_blank" rel="noopener noreferrer" aria-label="Open image ${esc(row.id)} on Civitai" title="Open on Civitai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l2-2"></path></svg></a><span class="image-category category-${esc(row.category || 'uncertain')}">${esc(styleNames[row.category] || 'Uncertain')}</span><span class="image-source" title="Captured source">${esc(sourceLabel)}</span></div><div class="reaction-strip"><span class="card-community-upvotes" data-community-id="${esc(row.id)}" title="${format(row.communityReactions?.upvote)} community upvotes on Search Civitai" aria-label="${format(row.communityReactions?.upvote)} community upvotes"><span aria-hidden="true">↑</span><b>${format(row.communityReactions?.upvote)}</b></span><span class="card-source-reactions" aria-label="Read-only Civitai source reactions">${reactionMarkup(row)}</span></div></article>`;
   }
   function markImageErrors(root) {
     root.querySelectorAll('img').forEach(img => img.addEventListener('error', async () => {
@@ -106,18 +113,26 @@
     const exactTag = tag !== '' && $('tag').dataset.exactTag === tag;
     const creator = $('creator').value.trim().replace(/^@+/, '');
     return {
+      ...Object.fromEntries(discoveryKeys.map(key=>[key,$(key).value.trim()])),...discoveryContext,
       q: $('query').value.trim(), qMode: $('qMode').value === 'any' ? 'any' : 'all',
       qScope: ['prompt', 'all'].includes($('qScope').value) ? $('qScope').value : 'prompt_tags',
       tag: exactTag ? tag : tag.split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean).join(', '),
       tagMatch: exactTag ? 'exact' : 'list',
       model: $('model').value.trim(),
+      modelMatch: $('model').value.trim() && $('model').dataset.exactModel === $('model').value.trim() ? 'exact' : 'contains',
+      loraMatch: $('lora').value.trim() && $('lora').dataset.exactLora === $('lora').value.trim() ? 'exact' : 'contains',
       tagMode: $('tagMode').value === 'any' ? 'any' : 'all', lora: $('lora').value.trim(),
-      creator, creatorMatch: creator && $('creator').dataset.exactCreator === creator ? 'exact' : 'contains', category: $('category').value,
-      sort: ['upvotes', 'civitai_reactions'].includes($('sort').value) ? $('sort').value : 'newest'
+      creator, creatorMatch: creator && $('creator').dataset.exactCreator === creator ? 'exact' : 'contains', category: $('category').value, source: $('source').value,
+      pg13: $('pg13').checked,
+      sort: ['upvotes', 'civitai_reactions','random'].includes($('sort').value) ? $('sort').value : 'newest'
     };
   }
   function setControls(filters) {
+    discoveryContext={recipe:filters.recipe||'',similar:filters.similar||'',image:filters.image||'',seed:filters.seed||shuffleSeed()};
     Object.entries(filterControls).forEach(([key, id]) => { $(id).value = filters[key] ?? defaultFilters[key]; });
+    $('pg13').checked = filters.pg13 !== false;
+    $('model').dataset.exactModel = filters.modelMatch === 'exact' ? filters.model : '';
+    $('lora').dataset.exactLora = filters.loraMatch === 'exact' ? filters.lora : '';
     $('tag').dataset.exactTag = filters.tagMatch === 'exact' ? filters.tag : '';
     $('creator').dataset.exactCreator = filters.creatorMatch === 'exact' ? filters.creator : '';
     syncTagHelp();
@@ -148,13 +163,29 @@
       button.setAttribute('aria-pressed', String(selectedQuery));
     });
     const filters = state.filters;
+    if ($('popularNav')) $('popularNav').href = '/popular.php?pg13=' + (filters.pg13 ? '1' : '0');
+    document.querySelectorAll('[data-library-nav]').forEach(a=>{const u=new URL(a.href);u.searchParams.set('pg13',filters.pg13?'1':'0');a.href=u;});
+    $('discoverBanner').hidden=filters.sort!=='random';
     const summaries = [
+      ['exclude',filters.exclude?'Exclude: '+filters.exclude:''],
+      ['orientation',filters.orientation?'Shape: '+filters.orientation:''],
+      ['minReactions',filters.minReactions?'Reactions ≥ '+filters.minReactions:''],
+      ['minWidth',filters.minWidth?'Width ≥ '+filters.minWidth+'px':''],
+      ['minHeight',filters.minHeight?'Height ≥ '+filters.minHeight+'px':''],
+      ['maxWidth',filters.maxWidth?'Width ≤ '+filters.maxWidth+'px':''],
+      ['maxHeight',filters.maxHeight?'Height ≤ '+filters.maxHeight+'px':''],
+      ['ready',filters.ready==='1'?'Stored images only':''],
+      ['recipe',filters.recipe?'Exact resource combination':''],
+      ['similar',filters.similar?'More like image #'+filters.similar+' · metadata similarity':''],
+      ['image',filters.image?'Image #'+filters.image:''],
       ['q', filters.q ? `${filters.qScope === 'all' ? 'Metadata' : filters.qScope === 'prompt' ? 'Prompt' : 'Prompt/tag'} ${filters.qMode === 'any' ? 'OR' : 'AND'}: ${filters.q}` : ''],
       ['tag', filters.tag ? `${filters.tagMatch === 'exact' ? 'Tag' : filters.tagMode === 'any' ? 'OR tags' : 'AND tags'}: ${filters.tag}` : ''],
       ['lora', filters.lora ? `LoRA: ${filters.lora}` : ''],
       ['model', filters.model ? `Model: ${filters.model}` : ''],
       ['creator', filters.creator ? `Creator: @${filters.creator}` : ''],
-      ['category', filters.category ? `Style: ${styleNames[filters.category] || filters.category}` : '']
+      ['category', filters.category ? `Style: ${styleNames[filters.category] || filters.category}` : ''],
+      ['source', filters.source ? `Source: ${filters.source === 'com' ? 'Civitai.com' : filters.source === 'red' ? 'Civitai.red' : 'Unknown / older records'}` : ''],
+      ['pg13', filters.pg13 ? 'PG-13 safety on' : '']
     ].filter(([, label]) => label);
     $('activeFilters').innerHTML = summaries.map(([key, label]) => `<button type="button" class="active-filter" data-clear-filter="${key}" title="Remove ${esc(label)}" aria-label="Remove filter: ${esc(label)}"><span>${esc(label)}</span><span aria-hidden="true">×</span></button>`).join('');
     $('filterCount').textContent = String(summaries.length);
@@ -188,10 +219,16 @@
     $('pagination').querySelectorAll('button').forEach(button => { button.disabled = true; });
     $('resultCount').textContent = 'Searching the library…';
     $('viewerStatus').textContent = options.keepViewer ? 'Loading the next page…' : '';
-    const params = new URLSearchParams({ action: 'search', ...filters, page: String(Math.max(1, targetPage)), limit: String(state.limit) });
+    const requestFilters = { ...filters, pg13: filters.pg13 === false ? '0' : '1' };
+    const params = new URLSearchParams({ action: 'search', ...requestFilters, page: String(Math.max(1, targetPage)), limit: String(state.limit) });
     try {
       const response = await protectedFetch(`api.php?${params}`, { headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal });
       const data = await response.json();
+      if (response.status===429 && data.code==='search_rate_limited') {
+        stopGalleryImages();
+        location.replace('access.php?action=search-block');
+        return false;
+      }
       if (!response.ok || !data.ok || !Array.isArray(data.items)) {
         const error = new Error(data.error || `The search request failed (${response.status}).`);
         if (response.status === 400) error.name = 'SearchInputError';
@@ -222,6 +259,12 @@
       if (options.scroll) window.scrollTo({ top: 0, behavior: 'instant' });
       if (window.CivitaiGalleryImages) stopGalleryImages = window.CivitaiGalleryImages.mount($('results'));
       else $('results').querySelectorAll('img[data-preview]').forEach(img => { img.loading = 'lazy'; img.src = img.dataset.preview; });
+      const share=new URLSearchParams();
+      for(const [key,value] of Object.entries(filters)) if(value!=='' && value!==undefined && (key==='pg13'||value!==defaultFilters[key])) share.set(key,key==='pg13'?(value?'1':'0'):String(value));
+      if(filters.sort==='random')share.set('seed',filters.seed);
+      if(layoutPreview)share.set('preview','layout');
+      history.replaceState(null,'',location.pathname+'?'+share);
+      if (filters.image && !autoOpenImage && state.items.length) { autoOpenImage=true;openViewer(0); }
       if (options.keepViewer && state.items.length) { state.viewerIndex = options.last ? state.items.length - 1 : 0; renderViewer(); }
       return true;
     } catch (error) {
@@ -351,12 +394,30 @@
       }
     }
   }
+  function discoveryProfile(kind,name) {
+    return '/discovery.php?'+new URLSearchParams({kind,key:name,pg13:state.filters.pg13?'1':'0'});
+  }
+  function imageDiscoveryTools(row) {
+    const pg13=state.filters.pg13?'1':'0';
+    let html='<section class="detail-section"><h2>Explore this image</h2><div class="discovery-tools">';
+    html+='<a href="/?'+esc(new URLSearchParams({similar:row.id,pg13}).toString())+'">More like this ↗</a>';
+    if(row.creatorName)html+='<a href="'+esc(discoveryProfile('creators',row.creatorName))+'">Creator profile ↗</a>';
+    if(row.modelName)html+='<a href="'+esc(discoveryProfile('models',row.modelName))+'">Model profile ↗</a>';
+    for(const name of (row.loras||[]))html+='<a href="'+esc(discoveryProfile('loras',name))+'">'+esc(name)+' · profile ↗</a>';
+    if(row.recipeKey)html+='<a href="'+esc(discoveryProfile('recipes',row.recipeKey))+'">Explore generation recipe ↗</a>';
+    html+='</div><p class="discovery-note">Similar images share indexed tags, prompt phrases or LoRAs. This is metadata matching; visual appearance may differ.</p>';
+    const weights=[...String(row.prompt||'').matchAll(/<lora:([^:>]+):(-?(?:\d+(?:\.\d+)?|\.\d+))>/gi)].slice(0,32);
+    if(weights.length)html+='<h3>LoRA weights captured in prompt</h3><div class="recipe-weights">'+weights.map(m=>esc(m[1])+': '+esc(m[2])+(Number(m[2])===0?' (disabled)':'')).join('<br>')+'</div>';
+    if(row.recipeKey)html+='<p class="discovery-note">Recipes group recorded checkpoint and LoRA names. Only weights explicitly written in the prompt are shown; absent settings are not inferred.</p>';
+    return html+'</section>';
+  }
   function renderViewer() {
     const row = state.items[state.viewerIndex]; if (!access.isVerified() || !row) return;
     const absoluteIndex = (state.page - 1) * state.limit + state.viewerIndex;
     const original = mediaUrl(row.downloadUrl, row.id), preview = mediaUrl(row.previewUrl, row.id);
     $('viewerPosition').textContent = `${format(absoluteIndex + 1)} / ${format(state.total)}`;
     $('viewerSource').href = sourceUrl(row);
+    $('viewerSimilar').href='/?'+new URLSearchParams({similar:row.id,pg13:state.filters.pg13?'1':'0'});
     $('viewerDownload').hidden = !original;
     $('viewerDownload').href = original || '#';
     $('viewerDownload').setAttribute('download', `civitai-${row.id}`);
@@ -372,6 +433,7 @@
     });
     $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('beforeend', creatorMarkup(row));
     $('viewerDetails').querySelector('.detail-identity').insertAdjacentHTML('afterend', `<section class="detail-section source-reaction-section"><div class="detail-heading"><h2>Civitai source reactions</h2><span class="read-only-label">Read-only</span></div><div class="source-reaction-values">${reactionMarkup(row, true)}</div><p>Last captured while scanning or refreshing Civitai. Community reactions are counted separately on this site.</p></section>`);
+    $('viewerDetails').insertAdjacentHTML('beforeend',imageDiscoveryTools(row));
     $('viewerPrev').disabled = state.viewerBusy || absoluteIndex <= 0;
     $('viewerNext').disabled = state.viewerBusy || absoluteIndex >= state.total - 1;
     $('viewerStatus').textContent = '';
@@ -403,13 +465,16 @@
   function clearFilters() { setControls(defaultFilters); applyFilters(); }
   function searchRelated(key, value) {
     // Keep typed model/LoRA constraints when a topic, style or sort is clicked.
+    if (key === 'pg13') value = false;
+    if (key === 'ready' && value==='') value='0';
     setControls({ ...currentFilters(), [key]: value });
     applyFilters();
   }
   function searchAllBy(key, value) {
     const name = String(value || '').trim();
     if (!name) return;
-    const filters = { ...defaultFilters, [key]: name, sort: (state.pendingFilters || state.filters).sort };
+    const current = state.pendingFilters || state.filters;
+    const filters = { ...defaultFilters, pg13: current.pg13 !== false, [key]: name, sort: current.sort };
     if (key === 'tag') filters.tagMatch = 'exact';
     setControls(filters);
     $('filterPanel').open = false;
@@ -428,11 +493,17 @@
     } catch { if (access.isVerified() && ticket === access.generation) $('health').textContent = 'Community image index'; }
   }
   $('searchForm').addEventListener('submit', event => { event.preventDefault(); search(); });
+  $('shuffleImages').addEventListener('click',()=>{
+    const filters={...currentFilters(),sort:'random',seed:shuffleSeed(),image:'',similar:''};
+    setControls(filters);closeViewer();loadPage(1,{filters});
+  });
   $('applyFilters').addEventListener('click', applyFilters);
   $('searchWithin').addEventListener('click', applyFilters);
   $('qScope').addEventListener('change', syncQueryScope);
   $('tag').addEventListener('input', () => { delete $('tag').dataset.exactTag; syncTagHelp(); });
   $('creator').addEventListener('input', () => { delete $('creator').dataset.exactCreator; });
+  $('model').addEventListener('input', () => { delete $('model').dataset.exactModel; });
+  $('lora').addEventListener('input', () => { delete $('lora').dataset.exactLora; });
   ['tag', 'model', 'lora', 'creator'].forEach(id => $(id).addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); applyFilters(); } }));
   $('qMode').addEventListener('change', search);
   $('sort').addEventListener('change', () => searchRelated('sort', $('sort').value));
@@ -493,12 +564,20 @@
     const value = String(params.get(key) || '').trim();
     if ([...value].length <= max && !value.includes('\0')) initialFilters[key] = value;
   }
-  for (const [key, choices] of Object.entries({ qMode: ['all', 'any'], qScope: ['prompt_tags', 'prompt', 'all'], tagMode: ['all', 'any'], tagMatch: ['list', 'exact'], category: ['', 'anime', 'realistic', 'uncertain'], sort: ['newest', 'upvotes', 'civitai_reactions'] })) {
+  for (const [key, choices] of Object.entries({ modelMatch: ['contains', 'exact'], loraMatch: ['contains', 'exact'], qMode: ['all', 'any'], qScope: ['prompt_tags', 'prompt', 'all'], tagMode: ['all', 'any'], tagMatch: ['list', 'exact'], category: ['', 'anime', 'realistic', 'uncertain'], source: ['', 'com', 'red', 'unknown'], sort: ['newest', 'upvotes', 'civitai_reactions','random'] })) {
     if (choices.includes(params.get(key))) initialFilters[key] = params.get(key);
   }
+  if (params.get('pg13') === '0' || params.get('pg13') === '1') initialFilters.pg13 = params.get('pg13') === '1';
   if (creator && [...creator].length <= 200 && !creator.includes('\0')) {
     initialFilters.creator = creator;
     initialFilters.creatorMatch = params.get('creatorMatch') === 'exact' ? 'exact' : 'contains';
+  }
+  for(const key of discoveryKeys) {
+    const value=params.get(key);
+    if(value!==null && value.length<=500) initialFilters[key]=value;
+  }
+  for(const key of ['recipe','similar','image','seed']) {
+    const value=params.get(key);if(value!==null && value.length<=64)initialFilters[key]=value;
   }
   setControls(initialFilters);
   function loadUnlockedLibrary() {
@@ -514,6 +593,7 @@
     state.items = []; state.community = null; state.pendingFilters = null; state.total = 0; state.page = 1; state.pages = 1;
     $('viewerMedia').replaceChildren(); $('viewerDetails').replaceChildren(); $('viewerReactions').replaceChildren();
     $('viewerSource').href = '#'; $('viewerDownload').href = '#'; $('viewerDownload').hidden = true; $('viewerDownload').removeAttribute('download');
+    $('viewerSimilar').href='#';
     $('viewerPosition').textContent = ''; $('viewerStatus').textContent = '';
     $('results').innerHTML = skeletonMarkup; $('results').classList.remove('is-empty'); $('results').setAttribute('aria-busy', 'true');
     $('pagination').replaceChildren(); $('health').textContent = 'Community image index'; $('resultCount').textContent = 'Verify to browse the library';

@@ -198,6 +198,8 @@ try {
         $pdo->prepare('INSERT INTO images_fts(image_id,prompt,negative_prompt,tags,model_name,lora_names) VALUES(?,?,?,?,?,?)')
             ->execute([$id, $merged['prompt'], $merged['negativePrompt'], implode(' ', $merged['tags']), $merged['modelName'], implode(' ', $merged['loras'])]);
     }
+    $pdo->prepare('INSERT INTO image_pg13_safety_v2(image_id,pg13_safe,checked_at) VALUES(?,?,?) ON CONFLICT(image_id) DO UPDATE SET pg13_safe=excluded.pg13_safe,checked_at=excluded.checked_at')
+        ->execute([$id,pg13_safe_for_fields($merged['prompt'],$merged['tags'],$merged['modelName'],$merged['loras']),gmdate('c')]);
     $pdo->exec('COMMIT');
     $transaction = false;
     $missingFields = repair_missing_fields($merged);

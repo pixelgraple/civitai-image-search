@@ -1,11 +1,11 @@
 // Index Civitai sends prompt metadata and source URLs to the public shared catalog.
 // The server owns image transfers. This extension has no file download API.
-importScripts('state-checkpoint.js', 'collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
+importScripts('catalog-metadata.js', 'state-checkpoint.js', 'collection-speed.js', 'download-settings.js', 'catalog-check-queue.js', 'source-reactions-queue.js', 'reaction-page-queue.js', 'vendor/devalue.js', 'background-feed.js', 'tab-feed-request.js', 'civitai-image-queue.js', 'catalog-db.js', 'civitai-auto-background.js');
 
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.20', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.21', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -100,19 +100,19 @@ function getTab(tabId) {
 function freshState(settings = {}) {
   return { version: RUN_VERSION, queue: [], catalogIds: [], catalogSyncedIds: [], catalogProcessedIds: [],
     catalogDiscoveredIds: [], outstandingIds: [], preparedRecords: {},
-    catalogStoredSkippedIds: [], catalogPromptlessSkippedIds: [], catalogOversizeSkippedIds: [], feed: settings.feed || null,
+    catalogStoredSkippedIds: [], catalogPromptlessSkippedIds: [], catalogOversizeSkippedIds: [], catalogRejectedIds: [], feed: settings.feed || null,
     sessionTabId: Number.isInteger(settings.sessionTabId) ? settings.sessionTabId : null,
     settings: { siteMode: 'civitai', serverCopies: true, backgroundMode: true,
       autoScroll: true, statsOnly: settings.statsOnly === true, pageUrl: String(settings.pageUrl || '') },
     status: { found: 0, catalogIndexed: 0, catalogSynced: 0, catalogStoredSkipped: 0,
-      catalogPromptlessSkipped: 0, catalogOversizeSkipped: 0, downloaded: 0, downloadedBytes: 0,
+      catalogPromptlessSkipped: 0, catalogOversizeSkipped: 0, catalogRejected: 0, downloaded: 0, downloadedBytes: 0,
       processed: 0, submitted: 0, pending: 0, phase: 'idle', lastActivityAt: 0, retryAt: 0,
       running: false, scanning: false, stopped: false, stopReason: '', lastError: '' } };
 }
 function recalcCounts(run) {
   Object.assign(run.status, { found: run.catalogIds.length, catalogIndexed: run.catalogIds.length,
     catalogSynced: run.catalogSyncedIds.length, catalogStoredSkipped: run.catalogStoredSkippedIds.length,
-    catalogPromptlessSkipped: run.catalogPromptlessSkippedIds.length, catalogOversizeSkipped: run.catalogOversizeSkippedIds.length, downloaded: 0, downloadedBytes: 0,
+    catalogPromptlessSkipped: run.catalogPromptlessSkippedIds.length, catalogOversizeSkipped: run.catalogOversizeSkippedIds.length, catalogRejected: run.catalogRejectedIds.length, downloaded: 0, downloadedBytes: 0,
     processed: (run.catalogProcessedIds || run.catalogIds).length, submitted: run.catalogSyncedIds.length,
     retryAt: Math.max(run.feed?.retryAt > Date.now() ? run.feed.retryAt : 0,
       run.uploadRetryAt > Date.now() ? run.uploadRetryAt : 0) });
@@ -132,7 +132,7 @@ function getPublicState(tabId, pageUrl) {
       sourceMismatch: !!run?.settings.pageUrl && !!pageUrl && run.settings.pageUrl !== pageUrl });
   }
   const runs = [...sessions.values()].map(publicRun), status = freshState().status;
-  for (const run of runs) for (const key of ['found','catalogIndexed','catalogSynced','catalogStoredSkipped','catalogPromptlessSkipped','catalogOversizeSkipped','processed','submitted','pending']) status[key] += run.status[key] || 0;
+  for (const run of runs) for (const key of ['found','catalogIndexed','catalogSynced','catalogStoredSkipped','catalogPromptlessSkipped','catalogOversizeSkipped','catalogRejected','processed','submitted','pending']) status[key] += run.status[key] || 0;
   status.lastActivityAt = Math.max(0, ...runs.map(run => run.status.lastActivityAt || 0));
   status.running = status.scanning = activeRuns().length > 0;
   return versionStatus({ ok: true, activeTabs: activeRuns().length, totalTabs: runs.length, runs, status, pipeline: pipelineSnapshot() });
@@ -156,7 +156,7 @@ function releaseOutstanding(id, kind, tabId) {
 }
 async function admitManualImage(id, run, isCurrent) {
   id = String(id);
-  if (run.catalogSyncedIds.includes(id) || run.catalogPromptlessSkippedIds.includes(id) || run.catalogOversizeSkippedIds.includes(id)) return;
+  if (run.catalogSyncedIds.includes(id) || run.catalogPromptlessSkippedIds.includes(id) || (run.catalogOversizeSkippedIds.includes(id) || run.catalogRejectedIds.includes(id))) return;
   while (isCurrent()) {
     if (reserveOutstanding(id, 'manual', run.sessionTabId, 'waitingMetadata')) {
       run.outstandingIds = [...new Set([...run.outstandingIds, String(id)])];
@@ -200,11 +200,13 @@ function acceptManualRecords(run, batch, storageItems) {
 }
 async function acceptManualRecordsNow(run, batch, storageItems) {
   if (!manualCurrent(run)) return;
+  const rejected = new Set(storageItems.filter(item=>item.downloadStatus==='skipped' && item.skipReason==='invalid-metadata').map(item=>item.imageId));
+  run.catalogRejectedIds=[...new Set([...run.catalogRejectedIds,...rejected])];
   const oversized = new Set(storageItems.filter(item => item.downloadStatus === 'skipped' && item.skipReason === 'oversize').map(item => item.imageId));
   await Promise.all([...oversized].map(discardOversizeReactions));
   run.catalogOversizeSkippedIds = [...new Set([...run.catalogOversizeSkippedIds, ...oversized])];
-  run.catalogSyncedIds = [...new Set([...run.catalogSyncedIds, ...batch.filter(item => !oversized.has(String(item.id))).map(item => String(item.id))])];
-  run.catalogStoredSkippedIds = [...new Set([...run.catalogStoredSkippedIds, ...storageItems.filter(item => item.exists && !oversized.has(item.imageId)).map(item => item.imageId)])];
+  run.catalogSyncedIds = [...new Set([...run.catalogSyncedIds, ...batch.filter(item => !oversized.has(String(item.id)) && !rejected.has(String(item.id))).map(item => String(item.id))])];
+  run.catalogStoredSkippedIds = [...new Set([...run.catalogStoredSkippedIds, ...storageItems.filter(item => item.exists && !oversized.has(item.imageId) && !rejected.has(item.imageId)).map(item => item.imageId)])];
   for (const item of batch) { delete run.preparedRecords[String(item.id)]; releaseManualImage(run, item.id); }
   run.uploadRetryAt = 0; run.uploadFailures = 0; run.status.lastError = ''; run.status.lastActivityAt = Date.now();
   await autoBrowseCollector.acknowledgeManual(batch); await persistState(run);
@@ -214,7 +216,7 @@ function ensureManualSubmission(run, record) {
   if (!tasks) { tasks = new Map(); manualSubmissionTasks.set(run, tasks); }
   const id = String(record.id);
   if (tasks.has(id)) return tasks.get(id);
-  if (run.catalogSyncedIds.includes(id) || run.catalogOversizeSkippedIds.includes(id)) { delete run.preparedRecords[id]; releaseManualImage(run, id); return persistState(run); }
+  if (run.catalogSyncedIds.includes(id) || (run.catalogOversizeSkippedIds.includes(id) || run.catalogRejectedIds.includes(id))) { delete run.preparedRecords[id]; releaseManualImage(run, id); return persistState(run); }
   if (run.uploadRetryAt > Date.now()) return Promise.reject(Object.assign(new Error(run.status.lastError || 'Waiting to retry the server upload.'),
     { status: 503, retryAfterMs: run.uploadRetryAt - Date.now() }));
   const current = () => manualCurrent(run);
@@ -266,6 +268,7 @@ function pipelineSnapshot(tabId) {
     discovered: runs.reduce((sum, run) => sum + run.catalogDiscoveredIds.length, 0) + (automatic.discovered || 0),
     accepted: runs.reduce((sum, run) => sum + run.catalogSyncedIds.length, 0) + (automatic.accepted || 0),
     alreadyStored: runs.reduce((sum, run) => sum + run.catalogStoredSkippedIds.length, 0) + (automatic.alreadyStored || 0),
+    skippedInvalid: runs.reduce((sum, run) => sum + run.catalogRejectedIds.length, 0) + (automatic.skippedInvalid || 0),
     skippedOversize: runs.reduce((sum, run) => sum + run.catalogOversizeSkippedIds.length, 0) + (automatic.skippedOversize || 0),
     metadataConcurrency: ISSCollectionSpeed.get().metadataConcurrency, uploadBatchSize: ISSCollectionSpeed.get().uploadBatchSize,
     uploadIntervalMs: ISSCollectionSpeed.get().uploadIntervalMs, collectionSpeed: ISSCollectionSpeed.get() };
@@ -331,16 +334,16 @@ async function restoreAll() {
     const pageUrl = String(prior.settings?.pageUrl || ''), tabId = prior.sessionTabId;
     if (!Number.isInteger(tabId) || !ISSBrowseCollector.page(pageUrl) || sessions.has(tabId)) continue;
     const run = freshState({ pageUrl, sessionTabId: tabId, statsOnly: prior.settings?.statsOnly === true }), driver = newDriver();
-    for (const key of ['catalogIds', 'catalogSyncedIds', 'catalogStoredSkippedIds', 'catalogPromptlessSkippedIds', 'catalogOversizeSkippedIds', 'catalogProcessedIds', 'catalogDiscoveredIds', 'outstandingIds']) {
+    for (const key of ['catalogIds', 'catalogSyncedIds', 'catalogStoredSkippedIds', 'catalogPromptlessSkippedIds', 'catalogOversizeSkippedIds', 'catalogRejectedIds', 'catalogProcessedIds', 'catalogDiscoveredIds', 'outstandingIds']) {
       run[key] = [...new Set((Array.isArray(prior[key]) ? prior[key] : []).map(String)
         .filter(id => /^[1-9]\d{0,19}$/.test(id) && Number.isSafeInteger(Number(id))))];
     }
     if (!run.catalogProcessedIds.length) run.catalogProcessedIds = run.catalogIds.slice();
     if (!run.catalogDiscoveredIds.length) run.catalogDiscoveredIds = run.catalogProcessedIds.slice();
-    run.outstandingIds = run.outstandingIds.filter(id => !run.catalogSyncedIds.includes(id) && !run.catalogPromptlessSkippedIds.includes(id) && !run.catalogOversizeSkippedIds.includes(id));
+    run.outstandingIds = run.outstandingIds.filter(id => !run.catalogSyncedIds.includes(id) && !run.catalogPromptlessSkippedIds.includes(id) && !(run.catalogOversizeSkippedIds.includes(id) || run.catalogRejectedIds.includes(id)));
     run.uploadRetryAt = Math.max(0, Math.min(Number(prior.uploadRetryAt) || 0, Date.now() + 300000));
     for (const record of Object.values(prior.preparedRecords || {})) {
-      if (record && /^[1-9]\d{0,19}$/.test(String(record.id)) && String(record.prompt || '').trim() && !run.catalogSyncedIds.includes(String(record.id))) {
+      if (record && /^[1-9]\d{0,19}$/.test(String(record.id)) && String(record.prompt || '').trim() && !run.catalogSyncedIds.includes(String(record.id)) && !run.catalogRejectedIds.includes(String(record.id))) {
         const capturedPageUrl = ISSSourceReactions.capturedPageUrl(record.id, record.capturedPageUrl) || ISSFeed.imagePageUrl(record.id, pageUrl);
         run.preparedRecords[String(record.id)] = { ...record, pageUrl: capturedPageUrl, capturedPageUrl };
         if (!run.outstandingIds.includes(String(record.id))) run.outstandingIds.push(String(record.id));
@@ -498,7 +501,7 @@ async function backgroundFeedPulse(tabId) {
           const ids = progress.ids.map(String);
           run.catalogDiscoveredIds = [...new Set([...run.catalogDiscoveredIds, ...ids])];
           if (run.settings.statsOnly) { await persistState(run); return; }
-          for (const id of ids) if (!run.catalogSyncedIds.includes(id) && !run.catalogOversizeSkippedIds.includes(id) && reserveOutstanding(id, 'manual', tabId))
+          for (const id of ids) if (!run.catalogSyncedIds.includes(id) && !(run.catalogOversizeSkippedIds.includes(id) || run.catalogRejectedIds.includes(id)) && reserveOutstanding(id, 'manual', tabId))
             run.outstandingIds = [...new Set([...run.outstandingIds, id])];
           await persistState(run);
           primeCatalogChecks(ids.filter(id => !run.catalogSyncedIds.includes(id) && run.outstandingIds.includes(id)), current).catch(() => {});
@@ -530,7 +533,7 @@ async function backgroundFeedPulse(tabId) {
             if (ISSFeed.needsReactionRefresh(progress.reactions)) await deferReactionPage(id, tabId, run.settings.pageUrl);
             return { skip: true };
           }
-          if (run.catalogPromptlessSkippedIds.includes(id) || run.catalogOversizeSkippedIds.includes(id)) return { skip: true };
+          if (run.catalogPromptlessSkippedIds.includes(id) || (run.catalogOversizeSkippedIds.includes(id) || run.catalogRejectedIds.includes(id))) return { skip: true };
           await admitManualImage(id, run, current);
           markOutstanding(id, 'manual', tabId, 'waitingDuplicateCheck');
           const stored = await checkQueuedCatalogImage(id, current);
@@ -573,7 +576,7 @@ async function backgroundFeedPulse(tabId) {
               if (!current()) return;
               run.catalogIds = [...new Set([...run.catalogIds, ...eligible.items.map(item => String(item.id))])];
               for (const record of eligible.items) {
-                if (run.catalogSyncedIds.includes(String(record.id)) || run.catalogOversizeSkippedIds.includes(String(record.id))) { releaseManualImage(run, record.id); continue; }
+                if (run.catalogSyncedIds.includes(String(record.id)) || (run.catalogOversizeSkippedIds.includes(String(record.id)) || run.catalogRejectedIds.includes(String(record.id)))) { releaseManualImage(run, record.id); continue; }
                 run.preparedRecords[String(record.id)] = record;
                 markOutstanding(record.id, 'manual', tabId, 'readyUpload');
               }
@@ -602,7 +605,7 @@ async function backgroundFeedPulse(tabId) {
       run.catalogIds = [...new Set([...run.catalogIds, ...eligible.items.map(item => String(item.id))])];
       run.status.phase = currentDriver.phase = 'submitting prompts'; run.status.lastActivityAt = Date.now();
       notifyStatusChanged();
-      const remaining = eligible.items.filter(record => !run.catalogSyncedIds.includes(String(record.id)) && !run.catalogOversizeSkippedIds.includes(String(record.id)));
+      const remaining = eligible.items.filter(record => !run.catalogSyncedIds.includes(String(record.id)) && !(run.catalogOversizeSkippedIds.includes(String(record.id)) || run.catalogRejectedIds.includes(String(record.id))));
       for (const record of remaining) run.preparedRecords[String(record.id)] = record;
       await persistState(run); enqueuePrepared(remaining).catch(() => {});
     }
@@ -668,7 +671,7 @@ async function syncCloudCatalogItems(records, { required = true, onAccepted, tab
     for (const key of ['tags', 'loras']) if ((!Array.isArray(merged[key]) || !merged[key].length) && prior[key]) merged[key] = prior[key];
     merged.reactions = { ...(prior.reactions || {}), ...(record.reactions || {}) }; uniqueRecords.set(id, merged);
   }
-  const unique = [...uniqueRecords.values()].filter(record => String(record.prompt || '').trim());
+  const unique = [...uniqueRecords.values()].map(ISSCatalogMetadata.record).filter(record => String(record.prompt || '').trim());
   const results = await Promise.all(unique.map(record => new Promise((resolve, reject) => {
     let entry = preparedUploads.get(record.id);
     const fresh = !entry;
@@ -685,6 +688,7 @@ async function syncCloudCatalogItems(records, { required = true, onAccepted, tab
   })));
   return { enabled: true, accepted: results.filter(item => item.downloadStatus !== 'skipped').length,
     alreadyStored: results.filter(item => item.exists && item.downloadStatus !== 'skipped').length,
+    skippedInvalid: results.filter(item => item.downloadStatus === 'skipped' && item.skipReason === 'invalid-metadata').length,
     skippedOversize: results.filter(item => item.downloadStatus === 'skipped' && item.skipReason === 'oversize').length,
     missing: results.filter(item => item.needsDownload).length, storageItems: results, skippedPromptless: uniqueRecords.size - unique.length };
 }
@@ -782,6 +786,7 @@ async function flushPreparedUploads() {
       active = active.filter(entry => items.some(item => item.id === entry.record.id));
       if (!active.length) return;
       const result = await postCatalog('images', { items });
+      const rejected = result.rejectedItems ?? [], rejectedById = new Map();
       const skipped = result.skippedItems ?? [], skippedById = new Map(), activeIds = new Set(active.map(entry => entry.record.id));
       if (!Array.isArray(skipped)) throw new Error('Shared catalog returned invalid skipped-image details. This batch has been retained for retry.');
       for (const item of skipped) {
@@ -789,10 +794,23 @@ async function flushPreparedUploads() {
           throw new Error('Shared catalog returned invalid skipped-image details. This batch has been retained for retry.');
         skippedById.set(item.imageId, { imageId: item.imageId, exists: true, needsDownload: false, downloadStatus: 'skipped', skipReason: 'oversize' });
       }
-      if (Number(result.accepted) + skippedById.size !== active.length || Number(result.skipped || 0) !== skippedById.size) throw new Error(`Shared catalog accepted ${Number(result.accepted) || 0} of ${active.length} records. This batch has been retained for retry.`);
-      await Promise.all(active.map(entry => completePreparedUpload(entry, skippedById.get(entry.record.id) || entry.storageItem)));
+      if (!Array.isArray(rejected)) throw new Error('Shared catalog returned invalid rejected-record details.');
+      for (const item of rejected) {
+        if (typeof item?.imageId!=='string' || !activeIds.has(item.imageId) || skippedById.has(item.imageId) || rejectedById.has(item.imageId) || item.reason!=='invalid-metadata')
+          throw new Error('Shared catalog returned invalid rejected-record details. The batch has been retained for retry.');
+        rejectedById.set(item.imageId,{imageId:item.imageId,exists:false,needsDownload:false,downloadStatus:'skipped',skipReason:'invalid-metadata',
+          error:String(item.error||'Invalid record metadata').slice(0,300),field:String(item.field||'record').slice(0,50)});
+      }
+      if (Number(result.accepted)+skippedById.size+rejectedById.size!==active.length || Number(result.skipped||0)!==skippedById.size)
+        throw new Error('Shared catalog returned incomplete record results. This batch has been retained for retry.');
+      for (const [id,item] of rejectedById) {
+        // Keep the original local record and rejection evidence; do not repeatedly send it.
+        await PromptCatalogDB.upsert([{id,catalogRejection:{at:Date.now(),field:item.field,error:item.error}}]);
+        addDebug('metadata-rejected','Image '+id+' set aside; scan continues',{imageId:id,field:item.field,error:item.error});
+      }
+      await Promise.all(active.map(entry => completePreparedUpload(entry, rejectedById.get(entry.record.id) || skippedById.get(entry.record.id) || entry.storageItem)));
       addDebug('server-storage', 'Submitted new prompt records after early duplicate checks', { checked: active.length,
-        alreadyStored: 0, needsCopy: active.length });
+        alreadyStored: 0, needsCopy: active.length - skippedById.size - rejectedById.size, rejected: rejectedById.size });
     });
   } catch (error) {
     for (const entry of batch) {

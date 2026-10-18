@@ -4,9 +4,13 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.20](https://search-civitai.xyz/downloads/index-civitai-2.8.20.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub release](https://github.com/pixelgraple/civitai-image-search/releases/tag/v2.8.20)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.21](https://search-civitai.xyz/downloads/index-civitai-2.8.21.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Browsing requires a short SVG CAPTCHA after the preloader; a successful answer unlocks that browser session for one hour across its tabs. No account or contributor key is needed. Extension contributions continue independently of the website CAPTCHA.
+
+## Metadata upload recovery
+
+Version 2.8.21 cleans and bounds optional resource names before submission, including previously queued records. The server applies the same normalization before validation. Invalid records are returned individually, set aside with their original local prompt and rejection evidence, and shown in the invalid-metadata counter; they do not count as accepted or stop other records. Refresh the extension and gallery tabs after updating; resume scans that were already stopped by the older version.
 
 ## Refresh Civitai reactions
 
@@ -38,7 +42,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.20.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.21.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.
@@ -142,6 +146,40 @@ Version 2.8.14 records the actual `civitai.red` or `civitai.com` capture domain.
 
 Choose **Most Civitai reactions** to rank captured likes, hearts, laughs and cries combined. Records with incomplete counts appear last. Buzz currency and this library's community votes are excluded. **Community upvotes** remains a separate sort.
 
+
+### Popular creators, models and LoRAs
+
+Open **Popular** beside **Images** to browse three rankings, with up to 50 entries each:
+
+- **Users:** creators with at least 50 indexed images that each have 200 or more recorded Civitai likes, hearts, laughs and cries combined. Rank is qualifying image count, then qualifying reactions, then total indexed images.
+- **Models:** checkpoints ranked by indexed image count.
+- **LoRAs:** ranked by indexed image count, counting each name once per image.
+
+Names are grouped without regard to case. Cards show small previews and open an exact-name gallery. Models and LoRAs break image-count ties using recorded reactions. Buzz and Search Civitai community votes are excluded. Known reaction counters can establish the 200 threshold even when other source counters are missing; missing values are never invented. Counts cover this indexed library, not all of Civitai.
+
+PG-13 is enabled by default and applies to ranking counts and previews. Cached previews are checked again against the current catalog and safety decisions before being returned. The directory may contain fewer than 50 qualifying users, particularly with PG-13 enabled.
+
+The server's **civitai-popular.timer** refreshes snapshots every 15 minutes through **popular-rebuild.php**, with one rebuild at a time. It reads the image catalog and atomically publishes a private cache beside the database in **popular-cache/rankings-v1.json**. Browsing reads this cache instead of rebuilding rankings on every request. The endpoint uses the existing CAPTCHA and search quota; images do not consume additional search quota.
+
+Deployment requires adding **popular.php** to the site's Nginx PHP page allowlist, installing the supplied service and timer, and running the first snapshot rebuild before enabling the navigation link.
+
+### Discovery tabs and profiles
+
+The main navigation includes **Models**, **LoRAs**, **Creators**, **Recipes**, **Prompt Explorer**, and **Discover**.
+
+- Model, LoRA and creator directories support name searches and pagination. Each profile has image examples, an exact gallery link and common resource/tag connections.
+- Profile connections describe a bounded sample of up to 1,000 indexed images. Their sample counts are labeled separately from whole-profile totals.
+- Recipes group recorded checkpoint names and complete LoRA-name sets. The directory shows combinations with at least two examples; individual recipe profiles can contain one. Weights may vary between examples. The image viewer displays only LoRA weights explicitly captured in the prompt, labeling zero weights disabled.
+- Prompt Explorer covers common descriptive phrases and captured source tags. Its custom phrase form can search any phrase within an optional checkpoint. Quoted phrases stay together in positive and excluded searches.
+- **More like this** in the image viewer finds up to 240 stored candidates using rare shared tags, common descriptive prompt phrases and LoRAs, with a bonus for the same checkpoint. It is metadata similarity, not a visual model.
+- Discover shuffles stored images and keeps the current search filters. A seed keeps pagination stable until the visitor selects Shuffle again.
+- Advanced gallery filters include excluded prompt words/phrases, minimum combined recorded source reactions, image orientation, minimum/maximum width and height, and stored-image availability. Existing model, LoRA, creator, tag, source and style filters combine with these.
+
+PG-13 is enabled by default across these pages. Cached previews are checked against current availability, collection skips and PG-13 decisions before they are returned. Direct image and similar-image searches also enforce the live filter. Source counts and metadata may be incomplete.
+
+Discovery uses a separate private SQLite snapshot at **/data/civitai/database/discovery-cache/catalog-v1.sqlite**. **civitai-discovery.timer** refreshes it every 15 minutes through **discovery-rebuild.php**; rebuilds read the catalog, take an exclusive rebuild lock and publish by atomic rename. The web API reads this snapshot and retains the existing CAPTCHA and search quota. Snapshots older than one day or with a mismatched policy version are rejected.
+
+Deployment adds **discovery.php** and **discover.php** to the existing Nginx PHP page allowlist. Keep **library-nav.php** an include only. Install the discovery service/timer and complete the first snapshot before publishing the navigation. App files stay under **/www/wwwroot/search-civitai.xyz**; the database and snapshot stay outside the public web directory.
 
 ### Repair incomplete records
 

@@ -8,6 +8,10 @@ try {
     $method = (string)($_SERVER['REQUEST_METHOD'] ?? 'GET');
     $action = is_string($_GET['action'] ?? null) ? $_GET['action'] : 'status';
     gate_check_origin($method);
+    if ($action==='search-block' && $method==='GET') {
+        require_once dirname(__DIR__).'/search-guard.php';
+        search_guard_page();
+    }
     if (!in_array($action, ['status', 'challenge', 'image', 'verify'], true)) gate_json(['ok' => false, 'error' => 'Unknown verification action.'], 404);
     $expected = $action === 'verify' ? 'POST' : 'GET';
     if ($method !== $expected) { header('Allow: ' . $expected); gate_json(['ok' => false, 'error' => 'Unsupported request method.'], 405); }

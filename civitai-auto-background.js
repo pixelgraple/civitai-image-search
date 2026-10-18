@@ -31,7 +31,7 @@ globalThis.ISSBrowseCollector = (() => {
   }
   function create(deps) {
     let saved = { version: 1, publicMode: true, pending: [], seen: [], tabs: {}, pausedTabs: [],
-      suspended: false, synced: 0, processed: 0, skipped: 0, skippedPromptless: 0, skippedOversize: 0, lastError: '', retryAt: 0 };
+      suspended: false, synced: 0, processed: 0, skipped: 0, skippedPromptless: 0, skippedOversize: 0, skippedInvalid: 0, lastError: '', retryAt: 0 };
     let busy = false, generation = 0, retryAt = 0, nextPulseAt = 0;
     const tabEpochs = new Map(), inFlight = new Set(), submitting = new Set(), drainingManual = new Set();
     const retiredOwners = new Map(), duplicateChecks = new WeakMap();
@@ -53,7 +53,7 @@ globalThis.ISSBrowseCollector = (() => {
     const tabEpoch = id => tabEpochs.get(id) || 0;
     const invalidateTab = id => tabEpochs.set(id, tabEpoch(id) + 1);
     const paused = id => Number.isInteger(id) && saved.pausedTabs.includes(id);
-    const freshTab = () => ({ discovered: 0, processed: 0, submitted: 0, alreadyStored: 0, skippedPromptless: 0, skippedOversize: 0,
+    const freshTab = () => ({ discovered: 0, processed: 0, submitted: 0, alreadyStored: 0, skippedPromptless: 0, skippedOversize: 0, skippedInvalid: 0,
       phase: 'waiting for images', lastActivityAt: 0, lastError: '' });
     const tabState = id => saved.tabs[String(id)] ||= freshTab();
     const touch = (id, phase) => {
@@ -89,7 +89,7 @@ globalThis.ISSBrowseCollector = (() => {
       for (const [id, state] of Object.entries(saved.tabs)) {
         if (!/^\d+$/.test(id) || !state || typeof state !== 'object') { delete saved.tabs[id]; continue; }
         saved.tabs[id] = { ...freshTab(), ...state };
-        for (const field of ['discovered', 'processed', 'submitted', 'alreadyStored', 'skippedPromptless', 'skippedOversize', 'lastActivityAt'])
+        for (const field of ['discovered', 'processed', 'submitted', 'alreadyStored', 'skippedPromptless', 'skippedOversize', 'skippedInvalid', 'lastActivityAt'])
           saved.tabs[id][field] = Math.max(0, Number(saved.tabs[id][field]) || 0);
         saved.tabs[id].phase = 'waiting to resume';
       }
@@ -134,6 +134,7 @@ globalThis.ISSBrowseCollector = (() => {
         submitted: scoped ? state.submitted : saved.synced, synced: scoped ? state.submitted : saved.synced,
         alreadyStored: scoped ? state.alreadyStored : saved.skipped,
         skippedPromptless: scoped ? state.skippedPromptless : saved.skippedPromptless,
+        skippedInvalid: scoped ? state.skippedInvalid : saved.skippedInvalid,
         skippedOversize: scoped ? state.skippedOversize : saved.skippedOversize,
         lastError: scoped ? state.lastError || saved.lastError : saved.lastError,
         manualPaused, tabPaused, phase,
@@ -411,6 +412,11 @@ globalThis.ISSBrowseCollector = (() => {
         await deps.upsert([record]); if (!await current()) return;
         const result = await deps.sync([record], { required: true, tabId: entry.tabId, isCurrent: current });
         if (!await current()) return;
+        if (Number(result?.skippedInvalid)>0) {
+          markProcessed(entry);remove(entry);markSeen(entry.card.id);
+          saved.skippedInvalid++;tabState(entry.tabId).skippedInvalid++;
+          touch(entry.tabId,'invalid metadata set aside; continuing');await persist();return;
+        }
         if (Number(result?.skippedOversize) > 0) { await skipOversize(entry); return; }
         const stored = Number(result?.alreadyStored) || 0;
         remove(entry); markSeen(entry.card.id); saved.synced++; saved.skipped += stored;
@@ -424,8 +430,9 @@ globalThis.ISSBrowseCollector = (() => {
       const values = Number.isInteger(tabId) ? [tabState(tabId)] : Object.values(saved.tabs);
       return values.reduce((result, value) => ({ discovered: result.discovered + (value.discovered || 0),
         accepted: result.accepted + (value.submitted || 0), alreadyStored: result.alreadyStored + (value.alreadyStored || 0),
+        skippedInvalid: result.skippedInvalid + (value.skippedInvalid || 0),
         skippedOversize: result.skippedOversize + (value.skippedOversize || 0) }),
-      { discovered: 0, accepted: 0, alreadyStored: 0, skippedOversize: 0 });
+      { discovered: 0, accepted: 0, alreadyStored: 0, skippedOversize: 0, skippedInvalid: 0 });
     }
     return { status, stats, accept, pulse, dropTab, reconfigure, initialized, pauseTab, resumeTab, acknowledgeManual,
       isPaused: tabId => paused(tabId) || saved.suspended,

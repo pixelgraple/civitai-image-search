@@ -2,6 +2,14 @@
 
 Release notes for **Index Civitai** and its shared Civitai Image Search server.
 
+## 2.8.21 — Resilient metadata uploads
+
+- Normalize LoRA/tag labels at the upload boundary, including old queued records: clean control characters and whitespace, preserve Unicode characters, deduplicate, and apply the server name/count limits.
+- Normalize optional names on the server before validation so older extensions can recover from the LoRA-name rejection.
+- Return per-record validation results. Invalid records are set aside without stopping healthy records or other tabs, and are not counted as accepted.
+- Retain the local prompt record and field-level rejection evidence. Show invalid-metadata counts in the panel and Browsing & activity. A fresh manual scan can revisit a set-aside record; automatic browsing suppresses immediate rediscovery.
+- Preserve queue state, authentication, body-size limits, source request pacing and server-only image downloads.
+
 ## Website — Search within models and LoRAs (2026-10-15)
 
 - Keep checkpoint/model, LoRA and source-tag fields visible above the gallery; partial names match anywhere, ignoring case.

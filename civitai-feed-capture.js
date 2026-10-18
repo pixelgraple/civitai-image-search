@@ -3,7 +3,7 @@
 // may scroll once to let Civitai load its own next batch.
 (() => {
   'use strict';
-  const VERSION = '2.8.20', MAX_URLS = 32, MAX_URL_LENGTH = 32768;
+  const VERSION = '2.8.21', MAX_URLS = 32, MAX_URL_LENGTH = 32768;
   const prior = window.__ISS_FEED_CAPTURE;
   if (prior?.version === VERSION) return;
   prior?.dispose?.();

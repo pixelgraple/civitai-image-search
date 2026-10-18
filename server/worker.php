@@ -2,6 +2,7 @@
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require __DIR__ . '/lib.php';
+require_once __DIR__ . '/image-network.php';
 $workerStarted=microtime(true);
 
 class WorkerSourceBackoff extends RuntimeException {
@@ -62,6 +63,8 @@ function worker_transfer_handle(object $state,int $maxBytes): object {
     if (!ftruncate($state->file,0) || !rewind($state->file)) throw new RuntimeException('Could not reset transfer spool.');
     $ch=curl_init($url);
     curl_setopt_array($ch,[
+        CURLOPT_RESOLVE=>image_pinned_resolution($url), CURLOPT_PROXY=>'',
+        CURLOPT_SSL_VERIFYPEER=>true, CURLOPT_SSL_VERIFYHOST=>2,
         CURLOPT_RETURNTRANSFER=>false, CURLOPT_FOLLOWLOCATION=>false, CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,
         CURLOPT_CONNECTTIMEOUT=>8, CURLOPT_TIMEOUT=>35, CURLOPT_USERAGENT=>'CivitaiPromptLibrary/1.0',
         CURLOPT_HTTPHEADER=>['Accept: image/webp,image/png,image/jpeg;q=0.9,*/*;q=0.1'],

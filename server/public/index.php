@@ -11,8 +11,10 @@ header('X-Frame-Options: DENY');
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Search the community Civitai image library by prompt, tags, model, LoRA, or creator, and sort by Civitai reactions.">
   <title>Search Civitai · Community image library</title>
-  <link rel="stylesheet" href="style.css?v=resource-search1">
+  <link rel="stylesheet" href="style.css?v=pg13-3">
   <link rel="stylesheet" href="access-gate.css?v=captcha1">
+  <link rel="stylesheet" href="popular.css?v=popular1">
+  <link rel="stylesheet" href="discovery.css?v=discovery2">
 </head>
 <body>
   <div id="libraryShell" inert aria-hidden="true">
@@ -21,17 +23,18 @@ header('X-Frame-Options: DENY');
     <form id="searchForm" class="search" role="search">
       <span class="search-kind" aria-hidden="true">Images</span>
       <label id="queryLabel" class="sr-only" for="query">Search positive prompts and tags</label>
-      <input id="query" type="search" maxlength="300" autocomplete="off" placeholder="Search prompt words or tags…">
+      <input id="query" type="search" maxlength="300" autocomplete="off" placeholder="Search words, tags or "quoted phrases"…">
       <label class="sr-only" for="qMode">Combine search words</label><select id="qMode" class="query-mode" title="Choose whether every word or any word must match"><option value="all">All words (AND)</option><option value="any">Any word (OR)</option></select>
       <button class="search-submit" type="submit" aria-label="Search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path></svg></button>
     </form>
-    <nav class="extension-nav" aria-label="Extension and guide"><a class="extension-link" href="/downloads/index-civitai-2.8.20.zip" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"></path></svg><span>Index Civitai</span></a><a class="guide-link" href="/guide.php">GUIDE</a></nav>
+    <nav class="extension-nav" aria-label="Extension and guide"><a class="extension-link" href="/downloads/index-civitai-2.8.21.zip" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"></path></svg><span>Index Civitai</span></a><a class="guide-link" href="/guide.php">GUIDE</a></nav>
   </header>
   <div class="browsebar">
-    <div class="browse-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8" cy="8" r="1.5"></circle><path d="m3 17 6-6 5 5 3-3 4 4"></path></svg><b>Images</b><span>Community library</span></div>
+    <?php $libraryActive=$libraryActive??'images'; require __DIR__.'/library-nav.php'; ?>
     <span id="health" class="library-health" role="status">Connecting…</span>
   </div>
   <main>
+    <section class="discover-banner" id="discoverBanner" hidden><div><h1>Discover something different</h1><p>A shuffled gallery of stored images. Your search and PG-13 filters still apply.</p></div><button type="button" id="shuffleImages" class="shuffle-button">Shuffle images ↻</button></section>
     <div id="layoutPreview" class="layout-preview" hidden role="status"><span><b>Layout preview</b> <span id="previewDescription">48 repeated cards from one stored image. The library is unchanged.</span></span><a href="/">Exit preview ↗</a></div>
     <section class="catalog-controls" aria-label="Image search filters">
       <section class="resource-search-bar" aria-labelledby="resourceSearchTitle">
@@ -57,23 +60,33 @@ header('X-Frame-Options: DENY');
             <div class="filter-field"><label for="qScope">Search words in</label><select id="qScope" aria-describedby="qScopeHelp"><option value="prompt_tags">Positive prompts + tags</option><option value="prompt">Positive prompts only</option><option value="all">All metadata</option></select><p id="qScopeHelp">All metadata also searches negative prompts, model names and LoRA names.</p></div>
             <div class="filter-field"><label for="creator">Creator username</label><input id="creator" type="search" maxlength="200" autocomplete="off" placeholder="Username or @username" aria-describedby="metadataHelp"></div>
             <div class="filter-field filter-field-wide"><label for="category">Image style</label><select id="category"><option value="">All styles</option><option value="anime">Anime</option><option value="realistic">Realistic</option><option value="uncertain">Uncertain</option></select><p>Anime includes fantasy, illustration and animation cues. Other images are sorted as Realistic; Uncertain is retained for older records.</p></div>
+            <div class="filter-field"><label for="source">Captured source</label><select id="source"><option value="">Both Civitai sources</option><option value="com">Civitai.com</option><option value="red">Civitai.red</option><option value="unknown">Unknown / older record</option></select><p>Use this to browse one source, or leave it on both.</p></div>
+            <div class="filter-field filter-field-wide"><label for="exclude">Prompt words or phrases to exclude</label><input id="exclude" type="text" maxlength="500" placeholder='watermark "motion blur"'><p>Use quotes to keep a phrase together. Any match in the positive prompt excludes the image.</p></div>
+            <div class="filter-field"><label for="minReactions">Minimum Civitai reactions</label><input id="minReactions" type="number" min="0" max="10000000" step="1" placeholder="Any"><p>Combined recorded likes, hearts, laughs and cries.</p></div>
+            <div class="filter-field"><label for="orientation">Image shape</label><select id="orientation"><option value="">Any shape</option><option value="portrait">Portrait</option><option value="landscape">Landscape</option><option value="square">Square / near square</option></select></div>
+            <div class="filter-field"><label for="minWidth">Minimum width (px)</label><input id="minWidth" type="number" min="0" max="4096" step="1" placeholder="Any"></div>
+            <div class="filter-field"><label for="minHeight">Minimum height (px)</label><input id="minHeight" type="number" min="0" max="4096" step="1" placeholder="Any"></div>
+            <div class="filter-field"><label for="maxWidth">Maximum width (px)</label><input id="maxWidth" type="number" min="0" max="4096" step="1" placeholder="Any"></div>
+            <div class="filter-field"><label for="maxHeight">Maximum height (px)</label><input id="maxHeight" type="number" min="0" max="4096" step="1" placeholder="Any"></div>
+            <div class="filter-field filter-field-wide"><label for="ready">Image availability</label><select id="ready"><option value="0">All indexed images</option><option value="1">Stored images only</option></select></div>
+            <div class="filter-field filter-field-wide safety-filter"><label class="filter-checkbox"><input id="pg13" type="checkbox" checked><span>PG-13 safe filter</span></label><p>On by default. A conservative filter checks prompts, tags, models and LoRAs for nudity, chest exposure, sexual content and spelling disguises on both Civitai sources. Some safe images may also be hidden. Metadata filtering cannot guarantee that an image is free of nudity. Turn it off to browse all indexed content.</p></div>
           </div>
-          <p id="metadataHelp" class="filter-source-note">Model, LoRA and creator searches match names captured from the source, ignoring case. Older images may be missing this metadata. Each filled filter must match.</p>
+          <p id="metadataHelp" class="filter-source-note">Model, LoRA and creator searches match names captured from the source, ignoring case. Older images may be missing this metadata. Each filled filter must match. The PG-13 rule is applied on the server before counts and pagination; it is never just a visual hide.</p>
           <div class="filter-actions"><button id="clearFilters" class="clear-filters" type="button">Clear all</button><button id="applyFilters" class="apply-filters" type="button">Apply filters</button></div>
         </div></details>
       </div>
       <div id="topics" class="topic-chips" role="group" aria-label="Quick prompt searches">
         <button type="button" data-query="" aria-pressed="true" class="is-active">All</button><button type="button" data-query="animal" aria-pressed="false">Animal</button><button type="button" data-query="beach" aria-pressed="false">Beach</button><button type="button" data-query="cartoon" aria-pressed="false">Cartoon</button><button type="button" data-query="cat" aria-pressed="false">Cat</button><button type="button" data-query="cosplay" aria-pressed="false">Cosplay</button><button type="button" data-query="cyberpunk" aria-pressed="false">Cyberpunk</button><button type="button" data-query="dog" aria-pressed="false">Dog</button><button type="button" data-query="dragon" aria-pressed="false">Dragon</button><button type="button" data-query="fantasy" aria-pressed="false">Fantasy</button><button type="button" data-query="landscape" aria-pressed="false">Landscape</button><button type="button" data-query="mecha" aria-pressed="false">Mecha</button><button type="button" data-query="portrait" aria-pressed="false">Portrait</button><button type="button" data-query="selfie" aria-pressed="false">Selfie</button><button type="button" data-query="steampunk" aria-pressed="false">Steampunk</button>
       </div>
-      <div class="resultbar"><span id="resultCount" role="status" aria-live="polite" tabindex="-1">Loading images…</span><label class="sort-control" for="sort"><span>Sort</span><select id="sort" aria-describedby="sortHelp"><option value="newest">Newest</option><option value="civitai_reactions">Most Civitai reactions</option><option value="upvotes">Community upvotes</option></select></label></div>
+      <div class="resultbar"><span id="resultCount" role="status" aria-live="polite" tabindex="-1">Loading images…</span><label class="sort-control" for="sort"><span>Sort</span><select id="sort" aria-describedby="sortHelp"><option value="newest">Newest</option><option value="civitai_reactions">Most Civitai reactions</option><option value="upvotes">Community upvotes</option><option value="random">Random discovery</option></select></label></div>
       <div id="searchContext" class="search-context" hidden><div id="activeFilters" class="active-filters" aria-label="Applied search filters"></div><p id="sortHelp" class="sort-help" hidden>Sorted by captured Civitai likes, hearts, laughs and cries combined. Incomplete counts appear last. Buzz and this site's community votes are excluded.</p></div>
     </section>
     <section id="results" class="results" aria-label="Matching images" aria-busy="true"><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div><div class="access-skeleton-card" aria-hidden="true"></div></section>
     <nav id="pagination" class="pagination" aria-label="Search result pages"></nav>
-    <footer><span>Search Civitai · A community prompt library</span><span>Search covers indexed images. Copies may still be processing.</span><a href="/guide.php">Contributor guide</a><a href="/extension.php">Install extension</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="/?preview=layout">Layout preview</a><a href="/downloads/index-civitai-2.8.20.zip" download>Index Civitai 2.8.20</a></footer>
+    <footer><span>Search Civitai · A community prompt library</span><span>Search covers indexed images. Copies may still be processing.</span><a href="/guide.php">Contributor guide</a><a href="/extension.php">Install extension</a><a href="https://github.com/pixelgraple/civitai-image-search" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="/?preview=layout">Layout preview</a><a href="/downloads/index-civitai-2.8.21.zip" download>Index Civitai 2.8.21</a></footer>
   </main>
   <dialog id="imageViewer" class="image-viewer" aria-labelledby="viewerTitle">
-    <div class="viewer-toolbar"><div class="viewer-toolbar-left"><button id="closeViewer" type="button" class="icon-button" aria-label="Close image viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button><span id="viewerPosition"></span></div><div class="viewer-actions"><a id="viewerSource" class="viewer-source" href="#" target="_blank" rel="noopener noreferrer">Open on Civitai ↗</a><a id="viewerDownload" class="viewer-download" href="#" download>Download original</a></div></div>
+    <div class="viewer-toolbar"><div class="viewer-toolbar-left"><button id="closeViewer" type="button" class="icon-button" aria-label="Close image viewer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button><span id="viewerPosition"></span></div><div class="viewer-actions"><a id="viewerSimilar" class="viewer-similar" href="#">More like this ↗</a><a id="viewerSource" class="viewer-source" href="#" target="_blank" rel="noopener noreferrer">Open on Civitai ↗</a><a id="viewerDownload" class="viewer-download" href="#" download>Download original</a></div></div>
     <div class="viewer-layout"><div class="viewer-stage"><button id="viewerPrev" class="viewer-arrow viewer-prev" type="button" aria-label="Previous image">‹</button><div id="viewerMedia" class="viewer-media"></div><button id="viewerNext" class="viewer-arrow viewer-next" type="button" aria-label="Next image">›</button><section id="viewerReactions" class="viewer-reactions" aria-label="Community reactions"></section></div><aside id="viewerDetails" class="viewer-details"></aside></div>
     <span id="viewerStatus" class="viewer-status" role="status" aria-live="polite"></span>
   </dialog>
@@ -93,6 +106,7 @@ header('X-Frame-Options: DENY');
   <noscript><div class="access-noscript"><h1>JavaScript is needed to continue.</h1><p>Enable JavaScript and reload this page to complete verification and open the image library.</p><a href="/guide.php">Read the contributor guide</a></div></noscript>
   <script src="access-gate.js?v=captcha1" defer></script>
   <script src="gallery-images.js?v=cards1" defer></script>
-  <script src="app.js?v=resource-search1" defer></script>
+  <script src="app.js?v=discovery1" defer></script>
 </body>
 </html>
+

@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.20', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.21', ROOT_ID = '__iss_panel_root';
   const previousRoot = document.getElementById(ROOT_ID);
   if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
     try { window.__ISS_TOGGLE_PANEL(); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
@@ -165,6 +165,7 @@
     $('browse').textContent = !browse ? 'Checking collection…' : browse.suspended ? `Collection paused: ${browse.lastError || 'Collection is temporarily unavailable.'}` : browse.tabPaused ? 'Collection and scrolling: paused on this tab.' : scrollSelected ? `Automatic scrolling: ${browse.scrollAllowed ? 'on' : 'waiting'} · feed scan active on this tab${browseWait}${!browse.scrollAllowed && !browse.sourcePaused ? ' · waiting for queue capacity or retry' : ''} · ${count(browse.pendingTotal ?? browse.pending)} queued across tabs` : browse.enabled ? `Visible-image collection: on · scrolling stays manual${browseWait} · ${count(browse.pendingTotal ?? browse.pending)} queued across tabs` : 'Visible-image collection: off. Scan this tab to start this gallery’s feed.';
     const shared = pipeline?.globalStages;
     $('sharedQueueStatus').hidden = !shared;
+    $('activity').textContent += ' · '+total(s.catalogRejected,browse?.skippedInvalid)+' invalid metadata set aside';
     $('sharedQueueStatus').textContent = shared ? `Shared queue: ${count((Number(shared.waitingDuplicateCheck) || 0) + (Number(shared.checkingDuplicates) || 0) + (Number(shared.waitingMetadata) || 0) + (Number(shared.readingPrompts) || 0))} preparing (checks/prompts) · ${count(shared.readyUpload)} ready to send · ${count(shared.uploading)} sending. ${count(pipeline.paused)} paused (included in these counts).` : '';
     $('queueStatus').textContent = pipeline ? `${count(pipeline.outstandingTotal)} / ${count(pipeline.outstandingLimit || 600)} outstanding across all tabs${Number(pipeline.outstandingTotal) >= 600 ? ` · scrolling paused until space is free.${Number(pipeline.paused) > 0 ? ` ${count(pipeline.paused)} images are queued on paused tabs. Resume a paused tab to drain its queue.` : ''}` : ''}` : `${total(s.pending, browse?.pending)} queued on this tab · ${count(browse?.pending)} automatic + ${count(s.pending)} feed`;
     $('pipelineStats').textContent = pipeline ? `This tab: ${count(pipeline.discovered)} discovered · ${count(pipeline.waitingDuplicateCheck)} waiting for duplicate check · ${count(pipeline.checkingDuplicates)} checking duplicates · ${count(pipeline.waitingMetadata)} waiting to read prompts · ${count(pipeline.readingPrompts)} reading prompts · ${count(pipeline.readyUpload)} records ready to send · ${count(pipeline.uploading)} records being sent` : 'Detailed queue stages will appear when the background connects.';

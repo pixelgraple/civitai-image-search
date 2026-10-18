@@ -1,0 +1,20 @@
+[Unit]
+Description=Refresh Search Civitai popular rankings
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=civitai-library
+Group=civitai-library
+Environment=CIVITAI_LIBRARY_CONFIG=/data/civitai/config/config.php
+ExecStart=/www/server/php/84/bin/php /www/wwwroot/search-civitai.xyz/popular-rebuild.php
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/civitai/database
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=1G
+TimeoutStartSec=20min
+
