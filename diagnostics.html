@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Index Civitai · Error log</title><link rel="stylesheet" href="diagnostics.css"><script src="diagnostics.js" defer></script><script src="diagnostics-page.js" defer></script></head>
+<body><main>
+<header><div><p class="eyebrow">Index Civitai <span id="version"></span></p><h1>Error log &amp; diagnostics</h1></div><a href="library.html" target="_blank" rel="noopener">Browsing &amp; activity ↗</a></header>
+<p class="intro">A local record of startup, connection, storage and collection problems. This page reads the log directly, even when the collector cannot respond.</p>
+<section class="health" aria-labelledby="healthTitle"><h2 id="healthTitle">Collector connection</h2><p id="workerStatus" role="status">Checking…</p><p id="queueStatus" class="muted"></p><button id="checkWorker" type="button">Check connection</button></section>
+<div class="toolbar"><label for="level">Show <select id="level"><option value="all">All events</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Activity</option></select></label><button id="refresh" type="button">Refresh log</button><button id="copy" type="button">Copy report</button><button id="download" type="button">Save report</button><button id="clear" type="button" class="secondary">Clear log</button></div>
+<p id="logStatus" role="status" aria-live="polite">Loading local events…</p>
+<p class="muted">Keeps up to 500 events for seven days. Repeated errors are limited. Reports contain operational errors and queue counts; prompt records, images, cookies and request bodies are not collected. Nothing is sent automatically.</p>
+<div id="events" class="events"></div>
+<details id="manualCopy" hidden><summary>Report text (select and copy)</summary><textarea id="report" readonly aria-label="Diagnostic report"></textarea></details>
+<p class="muted">If the toolbar launcher will not open, use <b>Extension options</b> on Brave’s Index Civitai details page to return here. A failure before Brave loads any extension code cannot be recorded here.</p>
+</main></body></html>

@@ -1,7 +1,7 @@
 // Observe visible cards passively; scroll only the exact gallery with an active scan.
 (() => {
   'use strict';
-  const VERSION = '2.8.27';
+  const VERSION = '2.8.28';
   if (location.protocol !== 'https:' || !['civitai.com', 'civitai.red'].includes(location.hostname)) return;
   if (window.__ISS_BROWSE_OBSERVER?.version === VERSION) return;
   window.__ISS_BROWSE_OBSERVER?.dispose?.();
@@ -286,7 +286,7 @@
         if (!status.manualPaused && collectCards().length) return;
       }
       retryAt = 0; scrollGallery();
-    } catch { retryAt = Date.now() + 5000; }
+    } catch (error) { globalThis.ISSDiagnostics?.relay('gallery', 'error', 'gallery-message', error); retryAt = Date.now() + 5000; }
     finally { busy = false; if (enabled()) schedule(2500 / speed()); }
   }
   function schedule(delay = 1500 / speed()) { if (disposed || !enabled() || timer != null) return; timer = setTimeout(() => scan(), delay); }

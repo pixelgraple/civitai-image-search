@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Index Civitai</title><link rel="stylesheet" href="popup.css"><script src="popup.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Index Civitai</title><link rel="stylesheet" href="popup.css"><script src="diagnostics.js" defer></script><script src="popup.js" defer></script></head>
 <body><main>
   <header><span class="mark" aria-hidden="true">⌗</span><div><h1>Index Civitai</h1><p id="version">Collection controls</p></div></header>
   <p id="launcherStatus" role="status" aria-live="polite">Opening this tab’s collection panel…</p>
@@ -8,5 +8,6 @@
   <button id="retry" type="button" disabled>Opening…</button>
   <button id="restart" type="button" hidden>Restart extension</button>
   <p id="recoveryHint" class="hint" hidden>Restarting keeps saved queues. Refresh your Civitai gallery afterwards; leave unfinished upload or edit forms untouched.</p>
+  <p><a href="diagnostics.html" target="_blank" rel="noopener">Error log &amp; diagnostics ↗</a></p>
   <nav aria-label="Library and activity"><a href="library.html" target="_blank" rel="noopener">Browsing &amp; activity ↗</a><a href="https://search-civitai.xyz/" target="_blank" rel="noopener noreferrer">Shared library ↗</a></nav>
 </main></body></html>

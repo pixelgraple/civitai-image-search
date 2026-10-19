@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.27', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.28', ROOT_ID = '__iss_panel_root';
   const previousRoot = document.getElementById(ROOT_ID);
   if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
     try { window.__ISS_TOGGLE_PANEL(true); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
@@ -15,6 +15,7 @@
   let backgroundVersion = '', statusProtocol = 0, workerChecked = false, statusPort = null, portReady = false, reconnectTimer = null, handshakeTimer = null, reconnectAttempts = 0, revision = 0;
   const root = document.createElement('div'); root.id = ROOT_ID;
   try {
+  globalThis.ISSDiagnostics?.relay('panel', 'info', 'panel-open', 'Collection panel opened.');
   const panel = root.attachShadow({ mode: 'open' });
   panel.innerHTML = `
     <style>
@@ -28,7 +29,7 @@
     <section class="shell" role="region" aria-label="Index Civitai">
       <header><span class="mark" aria-hidden="true">⌗</span><div><h2>Index Civitai</h2><small>This tab · v${VERSION}</small></div><div class="header-actions"><button id="settingsToggle" class="icon-button" type="button" aria-label="Collection settings" title="Collection settings" aria-expanded="false" aria-controls="settingsView"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 6 0 .5 2 2 1.2 2-.6 3 5.2-1.5 1.4v2.3l1.5 1.4-3 5.2-2-.6-2 1.2-.5 2H9l-.5-2-2-1.2-2 .6-3-5.2L3 14.5v-2.3l-1.5-1.4 3-5.2 2 .6 2-1.2z" transform="translate(1 -1) scale(.92)"/><circle cx="12" cy="12" r="3"/></svg></button><button id="close" class="icon-button close" aria-label="Hide Index Civitai" title="Hide panel; indexing continues">×</button></div></header>
       <section id="settingsView" class="settings-view" aria-labelledby="settingsHeading" hidden>
-        <div class="settings-head"><h3 id="settingsHeading">Collection settings</h3><button id="settingsClose" type="button">Done</button></div><p class="settings-intro">Changes apply while your tabs are collecting.</p>
+        <p><button id="openDiagnostics" type="button">Error log &amp; diagnostics ↗</button></p><div class="settings-head"><h3 id="settingsHeading">Collection settings</h3><button id="settingsClose" type="button">Done</button></div><p class="settings-intro">Changes apply while your tabs are collecting.</p>
         <section class="speed-control source-control" aria-labelledby="sourceHeading"><div class="speed-heading"><label id="sourceHeading" for="sourceConcurrency">Civitai requests at once</label><output id="sourceValue" for="sourceConcurrency">1</output></div><input id="sourceConcurrency" type="range" min="1" max="4" step="1" value="1" disabled aria-describedby="sourceHelp sourceSettingStatus"><div class="speed-scale" aria-hidden="true"><span>1 · Default</span><span>2</span><span>3</span><span>4 · Maximum</span></div><p id="sourceHelp" class="hint">One shared limit for every Civitai tab. Start at 1; higher limits can trigger Civitai rate limits. Cooldowns still apply.</p><p id="sourceSettingStatus" class="hint" role="status" aria-live="polite"></p><div class="speed-actions"><button id="sourceReset" type="button">Restore 1</button><button id="sourceRetry" type="button" hidden>Retry limit change</button></div></section>
         <label class="browse-option" for="autoBrowse"><input id="autoBrowse" type="checkbox" checked disabled><span><b>Collect images as you browse</b><small>Index visible images in open galleries. Only tabs you start with Scan this tab scroll automatically, including inactive tabs.</small></span></label><p id="autoBrowseStatus" class="settings-note" role="status" aria-live="polite"></p>
         <details class="advanced"><summary>Advanced settings</summary><section class="speed-control" aria-labelledby="speedHeading"><div class="speed-heading"><label id="speedHeading" for="collectionSpeed">Collection speed</label><output id="speedValue" for="collectionSpeed">1×</output></div><input id="collectionSpeed" type="range" min="1" max="5" step="0.5" value="1" disabled aria-describedby="speedHelp speedEffective"><div class="speed-scale" aria-hidden="true"><span>1× Normal</span><span>3×</span><span>5×</span></div><p id="speedHelp" class="hint">Adjusts discovery, scrolling, and prompt reading. The shared Civitai limit above always applies. Speed is a target, not guaranteed throughput. Server/CDN image downloads run separately.</p><p id="speedEffective" class="hint">Reading effective collection limits…</p><p id="speedStatus" class="hint" role="status" aria-live="polite">Checking collection speed…</p><div class="speed-actions"><button id="speedReset" type="button">Restore 1×</button><button id="speedRetry" type="button" hidden>Retry speed change</button></div></section>
@@ -43,6 +44,7 @@
   document.documentElement.appendChild(root);
   const $ = id => panel.getElementById(id);
   const count = value => Math.max(0, Number(value) || 0).toLocaleString();
+  panel.getElementById('openDiagnostics').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'openDiagnostics' }, () => { void chrome.runtime.lastError; }));
   const send = payload => ISSRuntimeRequest(payload).catch(error => ({ ok: false, error: error.message || 'Extension updated. Refresh this Civitai tab.' }));
   function createSpeedControl(onApplied) {
     let applied = 1, requested = null, sending = null, failed = null, profile = null, pending = false, editing = false, supported = false;
@@ -270,6 +272,7 @@
   window.__ISS_PANEL_VERSION = VERSION;
   return { ok: true, panelVersion: VERSION };
   } catch (error) {
+    globalThis.ISSDiagnostics?.relay('panel', 'error', 'panel-mount-failed', error);
     try { window.__ISS_DISPOSE_PANEL?.(); } catch { /* Always clear a failed mount. */ }
     root.remove();
     delete window.__ISS_PANEL_VERSION; delete window.__ISS_TOGGLE_PANEL; delete window.__ISS_DISPOSE_PANEL;

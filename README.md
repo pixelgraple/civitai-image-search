@@ -4,13 +4,21 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.27](https://search-civitai.xyz/downloads/index-civitai-2.8.27.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.27](https://search-civitai.xyz/downloads/index-civitai-2.8.28.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Browsing requires a short SVG CAPTCHA after the preloader; a successful answer unlocks that browser session for one hour across its tabs. No account or contributor key is needed. Extension contributions continue independently of the website CAPTCHA.
 
 ## Metadata upload recovery
 
 Version 2.8.21 cleans and bounds optional resource names before submission, including previously queued records. The server applies the same normalization before validation. Invalid records are returned individually, set aside with their original local prompt and rejection evidence, and shown in the invalid-metadata counter; they do not count as accepted or stop other records. Refresh the extension and gallery tabs after updating; resume scans that were already stopped by the older version.
+
+## Dedicated error log
+
+Version 2.8.28 adds **Error log & diagnostics** to the launcher, activity page and collection settings. If the launcher will not open, use **Extension options** on the browser's Index Civitai details page. The diagnostic page reads its own local journal directly; it does not wait for the collector to start.
+
+The journal records worker startup/import/restoration failures, panel opening failures, unanswered control messages, source/catalog errors, storage errors, heartbeat failures and five-minute queue samples. It retains at most 500 events for seven days, suppresses repeated errors and bounds writes. Queue samples with no completed work are warnings, not proof of a deadlock: cooldowns and missing prompts can explain them. Logs contain extension versions, timestamps and aggregate counts. Prompt records, images, cookies, headers and request bodies are not logged; URLs and common credential strings in errors are redacted. Nothing is uploaded automatically.
+
+Use **Check connection**, **Copy report** or **Save report** to share diagnostics. **Clear log** affects only the diagnostic journal. A browser failure before it executes any extension code cannot be captured; a failure opening the log database is shown on the diagnostics page. This release provides diagnostic evidence and does not claim that the reported missing launcher has been reproduced or fixed.
 
 ## Long-running collection
 
@@ -64,7 +72,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.27.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.28.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.

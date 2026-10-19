@@ -1,6 +1,7 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.27', API = 'https://search-civitai.xyz/api.php';
+  const log = globalThis.ISSDiagnostics?.start('activity'); log?.install();
+  const VERSION = '2.8.28', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
   $('panelOpenError').hidden = typeof location === 'undefined' || new URL(location.href).searchParams.get('panelError') !== '1';
   let settingsOpen = false, saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
@@ -176,7 +177,7 @@
       if (config?.ok === false || status?.ok === false || scans?.ok === false || source?.ok === false) throw new Error(config?.error || status?.error || scans?.error || source?.error || 'Could not read extension status.');
       if (disposed || revision !== before) return;
       applySnapshot({ config, browse: status, state: scans, source, transfers: transfers?.transfers, backgroundVersion: config.backgroundVersion || scans.backgroundVersion || status.backgroundVersion || '', statusProtocol: config.statusProtocol || scans.statusProtocol || status.statusProtocol || 0 });
-    } catch (error) { if (!disposed && revision === before) { $('browseState').textContent = 'Unavailable'; $('browseStatus').textContent = error.message; $('workerRecovery').hidden = false; } }
+    } catch (error) { log?.record('error', 'activity-connection', error); if (!disposed && revision === before) { $('browseState').textContent = 'Unavailable'; $('browseStatus').textContent = error.message; $('workerRecovery').hidden = false; } }
     finally { refreshing = false; }
   }
   async function checkHealth() {
@@ -188,7 +189,7 @@
       $('serverIndexedCount').textContent = count(data.counts?.total); $('serverStoredCount').textContent = count(data.counts?.ready); $('serverPendingCount').textContent = count(data.counts?.pending);
       $('serverStatus').textContent = 'Shared server totals · refreshes every 10 seconds. The server worker downloads image files from Civitai separately from prompt reading. Accepted records may still have a pending image file.';
     }
-    catch (error) { if (!disposed) { $('libraryHealth').textContent = `Library unavailable: ${error.message}`; $('serverStatus').textContent = `Server totals could not refresh: ${error.message}`; } }
+    catch (error) { log?.record('error', 'catalog-health', error); if (!disposed) { $('libraryHealth').textContent = `Library unavailable: ${error.message}`; $('serverStatus').textContent = `Server totals could not refresh: ${error.message}`; } }
     finally { healthBusy = false; }
   }
   function setBusy(value) { saving = value; $('saveSettings').disabled = value; $('autoBrowse').disabled = value; }

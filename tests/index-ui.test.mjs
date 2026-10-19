@@ -40,7 +40,7 @@ function libraryHarness({ pageUrl = 'chrome-extension://test-extension/library.h
   const transport = transportHarness({ connectFails });
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const cloud = { ...speedConfig(1), ...config };
-  const chrome = { runtime: { lastError: null, connect: transport.connect, sendMessage(payload, callback) {
+  const chrome = { runtime: { getURL: p => 'chrome-extension://test-extension/' + p, lastError: null, connect: transport.connect, sendMessage(payload, callback) {
     const reply = callback; callback = value => reply({ backgroundVersion, statusProtocol, ...value });
     messages.push(payload);
     if (payload.type === 'saveConfig') {
@@ -77,7 +77,7 @@ function panelHarness({ initialize = true, configured = true, config = {}, state
     removeEventListener(name, fn) { if (events[name] === fn) delete events[name]; }
   };
   const cloud = { ...speedConfig(1), ...config };
-  const chrome = { runtime: { lastError: null, connect: transport.connect, sendMessage(payload, callback) {
+  const chrome = { runtime: { getURL: p => 'chrome-extension://test-extension/' + p, lastError: null, connect: transport.connect, sendMessage(payload, callback) {
     messages.push(payload); const reply = callback; callback = value => reply({ backgroundVersion, statusProtocol, ...value });
     if (payload.type === 'setCollectionSpeed') {
       if (speedHandler) { speedHandler(payload, callback, cloud); return; }

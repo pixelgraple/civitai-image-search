@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Index Civitai",
-  "version": "2.8.27",
+  "version": "2.8.28",
   "description": "Anyone can index prompts while browsing Civitai. Images save on the shared server. No key, account, or local image downloads.",
   "permissions": [
     "storage",
@@ -13,18 +13,29 @@
     "alarms"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "worker.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://civitai.com/*", "https://civitai.red/*"],
-      "js": ["civitai-feed-capture.js"],
+      "matches": [
+        "https://civitai.com/*",
+        "https://civitai.red/*"
+      ],
+      "js": [
+        "civitai-feed-capture.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     },
     {
-      "matches": ["https://civitai.com/*", "https://civitai.red/*"],
-      "js": ["civitai-browse.js"],
+      "matches": [
+        "https://civitai.com/*",
+        "https://civitai.red/*"
+      ],
+      "js": [
+        "diagnostics.js",
+        "civitai-browse.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
@@ -37,5 +48,9 @@
     "https://search-civitai.xyz/*",
     "https://civitai.red/*",
     "https://civitai.com/*"
-  ]
+  ],
+  "options_ui": {
+    "page": "diagnostics.html",
+    "open_in_tab": true
+  }
 }

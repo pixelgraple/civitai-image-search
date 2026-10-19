@@ -5,7 +5,7 @@ importScripts('run-history.js', 'retry-policy.js', 'catalog-metadata.js', 'react
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.27', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.28', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -90,7 +90,8 @@ let debugLogEntries = [], persistChain = Promise.resolve(), offscreenCreating = 
 function readStorage(key) {
   return storageAccessReady.then(() => new Promise((resolve, reject) => chrome.storage.local.get(key, value => {
     const error = chrome.runtime.lastError;
-    error ? reject(new Error(error.message)) : resolve(value?.[key]);
+    if (error) { globalThis.ISSDiagnostics?.start('worker').record('error', 'storage-read', error.message); reject(new Error(error.message)); }
+    else resolve(value?.[key]);
   })));
 }
 function writeStorage(key, value) {
@@ -99,7 +100,8 @@ function writeStorage(key, value) {
 function writeStorageValues(values) {
   return new Promise((resolve, reject) => chrome.storage.local.set(values, () => {
     const error = chrome.runtime.lastError;
-    error ? reject(new Error(error.message)) : resolve();
+    if (error) { globalThis.ISSDiagnostics?.start('worker').record('error', 'storage-write', error.message); reject(new Error(error.message)); }
+    else resolve();
   }));
 }
 function getTab(tabId) {
@@ -339,6 +341,7 @@ function persistState(run) {
   persistChain = manualCheckpoint.request(); return persistChain;
 }
 function addDebug(stage, message, data = {}) {
+  if (/error|reject|reaction/.test(stage)) globalThis.ISSDiagnostics?.start('worker').record('error', stage, message, data);
   const safe = {};
   for (const [key, value] of Object.entries(data)) if (/^(checked|alreadyStored|needsCopy|images|page)$/.test(key)) safe[key] = Number(value) || 0;
   debugLogEntries.push({ time: new Date().toISOString(), stage: String(stage).slice(0, 80),
@@ -436,7 +439,12 @@ async function restoreAll() {
   await persistState();
 }
 const workerStartup = { phase: 'restoring', startedAt: Date.now(), error: '' };
-const ready = restoreAll().then(() => { workerStartup.phase = 'ready'; }, error => {
+const ready = restoreAll().then(() => {
+  workerStartup.phase = 'ready';
+  globalThis.ISSDiagnostics?.start('worker').record('info', 'worker-ready', 'Saved collection state restored.',
+    { ms: Date.now() - workerStartup.startedAt, count: sessions.size });
+}, error => {
+  globalThis.ISSDiagnostics?.start('worker').record('error', 'restore-failed', error);
   workerStartup.phase = 'error'; workerStartup.error = String(error.message || error).slice(0, 500); throw error;
 });
 
@@ -921,6 +929,8 @@ async function postCatalog(action, body) {
       uploadCooldownUntil = Math.max(uploadCooldownUntil, Date.now() + error.retryAfterMs);
       nextUploadAt = Math.max(nextUploadAt, uploadCooldownUntil);
     }
+    globalThis.ISSDiagnostics?.start('worker').record('error', 'catalog-request', error,
+      { action, status: Number(error.status) || 0, retryAt: uploadCooldownUntil });
     Object.assign(catalogStatus, { action, lastError: String(error?.message || error), lastStatus: Number(error?.status) || 0,
       retryAt: Math.max(uploadCooldownUntil, Date.now() + Math.max(5000, Number(error?.retryAfterMs) || 0)) });
     notifyStatusChanged(); throw error;
@@ -1108,7 +1118,25 @@ async function pulseAutoTabs() {
     }));
   } finally { autoTabPulseBusy = false; }
 }
+let lastDiagnosticSample = 0, lastDiagnosticProgress = 0, lastDiagnosticTotal = -1;
+function diagnosticCounts() {
+  const p = pipelineSnapshot(), g = p.globalStages;
+  return { outstanding: p.outstandingTotal, preparing: g.waitingDuplicateCheck + g.checkingDuplicates + g.waitingMetadata + g.readingPrompts,
+    ready: g.readyUpload, sending: g.uploading, paused: p.paused, activeTabs: activeRuns().length,
+    retryAt: uploadCooldownUntil, count: p.accepted + p.alreadyStored + p.skippedInvalid + p.skippedOversize };
+}
+function sampleDiagnosticQueue() {
+  if (!globalThis.ISSDiagnostics || Date.now() - lastDiagnosticSample < 300000) return;
+  lastDiagnosticSample = Date.now();
+  const counts = diagnosticCounts();
+  if (counts.count !== lastDiagnosticTotal || !counts.outstanding) lastDiagnosticProgress = Date.now();
+  lastDiagnosticTotal = counts.count;
+  const stalled = counts.activeTabs > 0 && counts.outstanding > counts.paused && Date.now() - lastDiagnosticProgress >= 300000;
+  globalThis.ISSDiagnostics.start('worker').record(stalled ? 'warning' : 'info', stalled ? 'queue-no-completions' : 'queue-snapshot',
+    stalled ? 'No completed work between five-minute samples. Source cooldowns or missing prompts may explain this; inspect connection errors.' : 'Collection queue sample.', counts);
+}
 function collectionClockPulse() {
+  try { sampleDiagnosticQueue(); } catch { /* Diagnostics never interrupt collection. */ }
   // Dispatch and acknowledge immediately. A slow metadata page never holds the
   // offscreen heartbeat, passive collection, or another tab's scroll clock.
   for (const run of sessions.values()) pumpManualPrepared(run);
@@ -1131,7 +1159,7 @@ async function refreshAutoBrowseTabs() {
   startClockTask('scroll', pulseAutoTabs); startClockTask('browse', () => autoBrowseCollector.pulse());
 }
 function isExtensionPage(sender) {
-  return ['library.html', 'popup.html'].some(path => sender?.url === chrome.runtime.getURL(path));
+  return ['library.html', 'popup.html', 'diagnostics.html'].some(path => sender?.url === chrome.runtime.getURL(path));
 }
 function isCivitaiSender(sender) {
   return Number.isInteger(sender?.tab?.id) && (sender.frameId == null || sender.frameId === 0) &&
@@ -1172,6 +1200,10 @@ async function handleMessage(message, sender) {
     case 'resume': return startSession(message, sender, true);
     case 'stop': { const tabId = controlTabId(message, sender); await stopSession(tabId, 'user');
       nextAutoTabPulseAt = 0; startClockTask('scroll', pulseAutoTabs); return { ok: true, state: getPublicState(tabId) }; }
+    case 'getDiagnosticSnapshot': {
+      if (!isExtensionPage(sender)) throw new Error('Diagnostics require an extension page.');
+      return versionStatus({ ok: true, counts: diagnosticCounts() });
+    }
     case 'getSourceStatus': return versionStatus({ ok: true, ...await getCivitaiSourceRequestState() });
     case 'pauseAll': {
       if (!isExtensionPage(sender)) throw new Error('Stop all collection from Browsing & activity.');
@@ -1257,6 +1289,7 @@ async function handleMessage(message, sender) {
   }
 }
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (['index-civitai-diagnostic', 'openDiagnostics'].includes(message?.type)) return false;
   // Launcher health and clock acknowledgements cannot wait behind restoration.
   if (message?.type === 'getWorkerHealth' && (!sender?.id || sender.id === chrome.runtime.id) && isExtensionPage(sender)) {
     sendResponse(versionStatus({ ok: true, ...workerStartup })); return false;
@@ -1273,7 +1306,7 @@ chrome.runtime.onConnect.addListener(connectStatusPort);
 chrome.action.onClicked.addListener(async tab => {
   if (!ISSBrowseCollector.page(tab?.url)) { await openLibrary(); return; }
   try {
-    const results = await withClockTimeout(chrome.scripting.executeScript({ target: { tabId: tab.id }, injectImmediately: true, files: ['civitai-feed-capture.js', 'runtime-request.js', 'download-control.js', 'source-control.js', 'panel.js'] }), 10000);
+    const results = await withClockTimeout(chrome.scripting.executeScript({ target: { tabId: tab.id }, injectImmediately: true, files: ['diagnostics.js', 'civitai-feed-capture.js', 'runtime-request.js', 'download-control.js', 'source-control.js', 'panel.js'] }), 10000);
     const result = results?.[0]?.result;
     if (!result?.ok || result.panelVersion !== BACKGROUND_VERSION) throw new Error(result?.error || 'The collection panel did not finish opening.');
     await Promise.allSettled([chrome.action.setBadgeText({ tabId: tab.id, text: '' }), chrome.action.setTitle({ tabId: tab.id, title: 'Index Civitai' })]);

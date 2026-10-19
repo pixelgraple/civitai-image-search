@@ -227,7 +227,10 @@ function civitaiRetryAfterMs(value) {
 
 async function requestCivitaiFeed(tabId, url, pageUrl, isCurrent = () => true) {
   if (!Number.isInteger(tabId)) throw Object.assign(new Error('The original Civitai tab is unavailable. Start from that tab again.'), { status: 409 });
-  return ISSCivitaiSourceQueue.enqueue(() => requestCivitaiFeedDirect(tabId, url, pageUrl), isCurrent, tabId);
+  return ISSCivitaiSourceQueue.enqueue(() => requestCivitaiFeedDirect(tabId, url, pageUrl), isCurrent, tabId).catch(error => {
+    globalThis.ISSDiagnostics?.start('worker').record('warning', 'source-request', error, { status: Number(error.status) || 0 });
+    throw error;
+  });
 }
 
 async function requestCivitaiFeedDirect(tabId, url, pageUrl) {

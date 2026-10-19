@@ -9,6 +9,14 @@ Release notes for **Index Civitai** and its shared Civitai Image Search server.
 - Add an optional 60-second guard for root SSH diagnostic file searches, excluding application services and streaming pipe filters.
 - Cover timeout, navigation cancellation, response-body stalls, verification, and process selection with focused regression checks.
 
+## 2.8.28 - Dedicated extension diagnostics
+
+- Add a separate, local error journal capped at 500 events and seven days, with repeated-error suppression, write bounds and failure backoff.
+- Add Error log & diagnostics with filtering, live refresh, independent worker checks, copy/save reports and log-only clearing. Make it the browser's Extension options page so it remains accessible without the collection panel.
+- Load a minimal worker bootstrap first to record collector import failures. Record startup/restore, control/panel, source/server, storage and heartbeat errors plus five-minute aggregate queue samples.
+- Keep diagnostic writes independent of catalog queues, avoid logging request bodies and prompt records, and redact URLs and common credential strings. Do not send diagnostic reports automatically.
+- Preserve the 2.8.27 history optimization and all collection settings, saved queues, cursors and cooldowns. The currently reported missing launcher still needs live diagnostic evidence.
+
 ## 2.8.27 - Reduce growing history overhead and recover stalled gallery messages
 
 - Save large per-feed ID histories incrementally in bounded storage chunks. Ordinary queue checkpoints no longer clone and rewrite all previous IDs across every feed.
