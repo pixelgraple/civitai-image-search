@@ -9,6 +9,14 @@ Release notes for **Index Civitai** and its shared Civitai Image Search server.
 - Add an optional 60-second guard for root SSH diagnostic file searches, excluding application services and streaming pipe filters.
 - Cover timeout, navigation cancellation, response-body stalls, verification, and process selection with focused regression checks.
 
+## 2.8.26 - Finish saved uploads after a source tab closes
+
+- Send already-prepared records after a source tab closes, navigates away, or changes identity during restart. Source scanning stays paused with its cursor retained.
+- Reuse duplicate checks, paced batches, retry cooldowns and the existing shared server download lane. No image bytes download to the computer.
+- Preserve explicit user stops and authentication/permission rejection pauses when their tabs close later.
+- Show retained prepared records in each feed's queued count and identify saved-upload recovery in both activity views.
+- Add regressions for a stranded 40-record queue, duplicate skipping, cooldowns, stop controls, legacy migration, and a tab closing during submission.
+
 ## 2.8.25 - Collection clock and control recovery
 
 - Keep the toolbar launcher visible after opening the page panel, with an independent worker-health reply during queue restoration.

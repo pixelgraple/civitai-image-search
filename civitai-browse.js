@@ -1,7 +1,7 @@
 // Observe visible cards passively; scroll only the exact gallery with an active scan.
 (() => {
   'use strict';
-  const VERSION = '2.8.25';
+  const VERSION = '2.8.26';
   if (location.protocol !== 'https:' || !['civitai.com', 'civitai.red'].includes(location.hostname)) return;
   if (window.__ISS_BROWSE_OBSERVER?.version === VERSION) return;
   window.__ISS_BROWSE_OBSERVER?.dispose?.();

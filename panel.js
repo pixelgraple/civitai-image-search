@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.25', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.26', ROOT_ID = '__iss_panel_root';
   const previousRoot = document.getElementById(ROOT_ID);
   if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
     try { window.__ISS_TOGGLE_PANEL(true); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
@@ -169,7 +169,7 @@
     const shared = pipeline?.globalStages;
     $('sharedQueueStatus').hidden = !shared;
     $('activity').textContent += ' · '+total(s.catalogRejected,browse?.skippedInvalid)+' invalid metadata set aside';
-    $('sharedQueueStatus').textContent = shared ? `Shared queue: ${count((Number(shared.waitingDuplicateCheck) || 0) + (Number(shared.checkingDuplicates) || 0) + (Number(shared.waitingMetadata) || 0) + (Number(shared.readingPrompts) || 0))} preparing (checks/prompts) · ${count(shared.readyUpload)} ready to send · ${count(shared.uploading)} sending. ${count(pipeline.paused)} paused (included in these counts).` : '';
+    $('sharedQueueStatus').textContent = shared ? `Shared queue: ${count((Number(shared.waitingDuplicateCheck) || 0) + (Number(shared.checkingDuplicates) || 0) + (Number(shared.waitingMetadata) || 0) + (Number(shared.readingPrompts) || 0))} preparing (checks/prompts) · ${count(shared.readyUpload)} ready to send · ${count(shared.uploading)} sending. ${count(pipeline.paused)} paused (included in these counts).${Number(pipeline.recoveringUploads) ? ` ${count(pipeline.recoveringUploads)} saved records are finishing automatically after their source tabs closed or changed.` : ''}` : '';
     $('queueStatus').textContent = pipeline ? `${count(pipeline.outstandingTotal)} / ${count(pipeline.outstandingLimit || 600)} outstanding across all tabs${Number(pipeline.outstandingTotal) >= 600 ? ` · scrolling paused until space is free.${Number(pipeline.paused) > 0 ? ` ${count(pipeline.paused)} images are queued on paused tabs. Resume a paused tab to drain its queue.` : ''}` : ''}` : `${total(s.pending, browse?.pending)} queued on this tab · ${count(browse?.pending)} automatic + ${count(s.pending)} feed`;
     $('pipelineStats').textContent = pipeline ? `This tab: ${count(pipeline.discovered)} discovered · ${count(pipeline.waitingDuplicateCheck)} waiting for duplicate check · ${count(pipeline.checkingDuplicates)} checking duplicates · ${count(pipeline.waitingMetadata)} waiting to read prompts · ${count(pipeline.readingPrompts)} reading prompts · ${count(pipeline.readyUpload)} records ready to send · ${count(pipeline.uploading)} records being sent` : 'Detailed queue stages will appear when the background connects.';
     $('sourceNotice').textContent = state?.sourceMismatch ? `This tab changed page. Its active scan still follows the saved source: ${state.sourcePageUrl || state.pageUrl || 'the original selected feed'}. Stop tab before starting another feed here.` : '';

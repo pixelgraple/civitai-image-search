@@ -5,7 +5,7 @@ importScripts('retry-policy.js', 'catalog-metadata.js', 'reaction-backlog.js', '
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.25', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.26', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -105,7 +105,7 @@ function getTab(tabId) {
   }));
 }
 function freshState(settings = {}) {
-  return { version: RUN_VERSION, queue: [], catalogIds: [], catalogSyncedIds: [], catalogProcessedIds: [],
+  return { version: RUN_VERSION, allowDetachedUploads: true, queue: [], catalogIds: [], catalogSyncedIds: [], catalogProcessedIds: [],
     catalogDiscoveredIds: [], outstandingIds: [], preparedRecords: {},
     catalogStoredSkippedIds: [], catalogPromptlessSkippedIds: [], catalogOversizeSkippedIds: [], catalogRejectedIds: [], feed: settings.feed || null,
     sessionTabId: Number.isInteger(settings.sessionTabId) ? settings.sessionTabId : null,
@@ -127,9 +127,11 @@ function recalcCounts(run) {
 function publicRun(run = freshState()) {
   recalcCounts(run); const driver = drivers.get(run.sessionTabId) || newDriver();
   return structuredClone({ tabId: run.sessionTabId, pageUrl: run.settings.pageUrl,
-    settings: run.settings, status: run.status, queue: [],
+    settings: run.settings, status: { ...run.status,
+      pending: Math.max(run.status.running ? run.status.pending || 0 : 0, run.outstandingIds.length) }, queue: [],
     feed: run.feed ? { pages: run.feed.pages, cursor: run.feed.cursor, done: !!run.feed.done } : null,
-    sessionTabId: run.sessionTabId, driver: { enabled: driver.enabled, busy: driver.busy, phase: driver.phase, batchNumber: run.feed?.pages || 0 },
+    sessionTabId: run.sessionTabId, recoveringUploads: canRecoverPrepared(run) ? Object.keys(run.preparedRecords).length : 0,
+    driver: { enabled: driver.enabled, busy: driver.busy, phase: driver.phase, batchNumber: run.feed?.pages || 0 },
     canResume: !!run.feed && (!run.feed.done || Object.keys(run.preparedRecords || {}).length > 0) && !run.status.running });
 }
 function getPublicState(tabId, pageUrl) {
@@ -181,6 +183,16 @@ async function admitManualImage(id, run, isCurrent) {
   throw Object.assign(new Error('Collection was paused.'), { status: 409 });
 }
 const manualCurrent = run => sessions.get(run.sessionTabId) === run && run.status.running && !run.status.stopped;
+function recoverableSourcePause(run) {
+  return ['source-tab-closed', 'source-tab-changed'].includes(run.status.stopReason) ||
+    (run.status.stopReason === 'resume-required' && /^Source tab changed after restart\./.test(run.status.lastError));
+}
+function canRecoverPrepared(run) {
+  return !!run && sessions.get(run.sessionTabId) === run && !run.status.running &&
+    run.settings.serverCopies === true && run.allowDetachedUploads !== false &&
+    recoverableSourcePause(run) && Object.keys(run.preparedRecords).length > 0;
+}
+const manualUploadCurrent = run => !!run && (manualCurrent(run) || canRecoverPrepared(run));
 function releaseManualImage(run, id) {
   id = String(id); run.outstandingIds = run.outstandingIds.filter(value => value !== id);
   // Capacity is released by persistState only after durable ownership removal.
@@ -206,7 +218,7 @@ function acceptManualRecords(run, batch, storageItems) {
   group.records.push(...batch); group.storage.push(...storageItems); return group.work;
 }
 async function acceptManualRecordsNow(run, batch, storageItems) {
-  if (!manualCurrent(run)) return;
+  if (!manualUploadCurrent(run)) return;
   const rejected = new Set(storageItems.filter(item=>item.downloadStatus==='skipped' && item.skipReason==='invalid-metadata').map(item=>item.imageId));
   run.catalogRejectedIds=[...new Set([...run.catalogRejectedIds,...rejected])];
   const oversized = new Set(storageItems.filter(item => item.downloadStatus === 'skipped' && item.skipReason === 'oversize').map(item => item.imageId));
@@ -215,7 +227,10 @@ async function acceptManualRecordsNow(run, batch, storageItems) {
   run.catalogSyncedIds = [...new Set([...run.catalogSyncedIds, ...batch.filter(item => !oversized.has(String(item.id)) && !rejected.has(String(item.id))).map(item => String(item.id))])];
   run.catalogStoredSkippedIds = [...new Set([...run.catalogStoredSkippedIds, ...storageItems.filter(item => item.exists && !oversized.has(item.imageId) && !rejected.has(item.imageId)).map(item => item.imageId)])];
   for (const item of batch) { delete run.preparedRecords[String(item.id)]; releaseManualImage(run, item.id); }
-  run.uploadRetryAt = 0; run.uploadFailures = 0; run.status.lastError = ''; run.status.lastActivityAt = Date.now();
+  run.uploadRetryAt = 0; run.uploadFailures = 0;
+  // Preserve the source-resume explanation while sending already-read records.
+  if (manualCurrent(run)) run.status.lastError = '';
+  run.status.lastActivityAt = Date.now();
   await autoBrowseCollector.acknowledgeManual(batch); await persistState(run);
 }
 function ensureManualSubmission(run, record) {
@@ -226,20 +241,25 @@ function ensureManualSubmission(run, record) {
   if (run.catalogSyncedIds.includes(id) || (run.catalogOversizeSkippedIds.includes(id) || run.catalogRejectedIds.includes(id))) { delete run.preparedRecords[id]; releaseManualImage(run, id); return persistState(run); }
   if (run.uploadRetryAt > Date.now()) return Promise.reject(Object.assign(new Error(run.status.lastError || 'Waiting to retry the server upload.'),
     { status: 503, retryAfterMs: run.uploadRetryAt - Date.now() }));
-  const current = () => manualCurrent(run);
+  const current = () => manualUploadCurrent(run);
   const work = (async () => {
     await admitManualImage(id, run, current); if (!current()) throw Object.assign(new Error('Collection was paused.'), { status: 409 });
     markOutstanding(id, 'manual', run.sessionTabId, 'readyUpload');
-    return syncCloudCatalogItems([record], { tabId: run.sessionTabId, isCurrent: current, onAccepted: (batch, stored) => acceptManualRecords(run, batch, stored) });
+    return syncCloudCatalogItems([record], { tabId: run.sessionTabId, isCurrent: current,
+      useSharedTransferLane: () => canRecoverPrepared(run),
+      onAccepted: (batch, stored) => acceptManualRecords(run, batch, stored) });
   })().catch(async error => {
     if (current() && error.status !== 409) {
       if (!(run.uploadRetryAt > Date.now())) run.uploadFailures = (run.uploadFailures || 0) + 1;
       const transient = ISSRetryPolicy.isTransient(error);
       run.uploadRetryAt = Date.now() + (transient ? ISSRetryPolicy.delay(error) : Math.min(300000, Math.max(5000 * 2 ** Math.min(6, (run.uploadFailures || 1) - 1), error.retryAfterMs || 0)));
-      run.status.lastError = String(error.message || 'Server upload failed.').slice(0, 500);
+      const uploadError = String(error.message || 'Server upload failed.').slice(0, 500);
+      // Do not replace a resume-required source explanation with a transient
+      // upload error: it is also the durable eligibility for detached recovery.
+      if (manualCurrent(run)) run.status.lastError = uploadError;
       run.status.phase = 'waiting for server retry'; run.status.lastActivityAt = Date.now();
       if ([400, 401, 403, 404].includes(error.status) || (run.uploadFailures >= 3 && !transient))
-        await stopSession(run.sessionTabId, 'upload-error', run.status.lastError);
+        await stopSession(run.sessionTabId, 'upload-error', uploadError);
       else await persistState(run);
     }
     throw error;
@@ -247,7 +267,7 @@ function ensureManualSubmission(run, record) {
   tasks.set(id, work); return work;
 }
 function pumpManualPrepared(run) {
-  if (!manualCurrent(run) || run.uploadRetryAt > Date.now()) return;
+  if (!manualUploadCurrent(run) || run.uploadRetryAt > Date.now()) return;
   for (const record of Object.values(run.preparedRecords)) ensureManualSubmission(run, record).catch(() => {});
 }
 function pipelineSnapshot(tabId) {
@@ -272,7 +292,9 @@ function pipelineSnapshot(tabId) {
   const automatic = autoBrowseCollector?.stats(tabId) || {};
   return { ...stages, globalStages, outstanding: entries.length, outstandingTotal: outstandingImages.size, outstandingLimit: OUTSTANDING_LIMIT,
     paused: [...outstandingImages.values()].filter(entry => [...entry.owners.values()].every(owner =>
-      owner.kind === 'manual' ? !sessions.get(owner.tabId)?.status.running : autoBrowseCollector.isPaused(owner.tabId))).length,
+      owner.kind === 'manual' ? !manualUploadCurrent(sessions.get(owner.tabId)) : autoBrowseCollector.isPaused(owner.tabId))).length,
+    recoveringUploads: allEntries.filter(([id, entry]) => [...entry.owners.values()].some(owner =>
+      owner.kind === 'manual' && canRecoverPrepared(sessions.get(owner.tabId)) && sessions.get(owner.tabId).preparedRecords[id])).length,
     discovered: runs.reduce((sum, run) => sum + run.catalogDiscoveredIds.length, 0) + (automatic.discovered || 0),
     accepted: runs.reduce((sum, run) => sum + run.catalogSyncedIds.length, 0) + (automatic.accepted || 0),
     alreadyStored: runs.reduce((sum, run) => sum + run.catalogStoredSkippedIds.length, 0) + (automatic.alreadyStored || 0),
@@ -342,6 +364,7 @@ async function restoreAll() {
     const pageUrl = String(prior.settings?.pageUrl || ''), tabId = prior.sessionTabId;
     if (!Number.isInteger(tabId) || !ISSBrowseCollector.page(pageUrl) || sessions.has(tabId)) continue;
     const run = freshState({ pageUrl, sessionTabId: tabId, statsOnly: prior.settings?.statsOnly === true }), driver = newDriver();
+    run.allowDetachedUploads = prior.settings?.serverCopies === true && prior.allowDetachedUploads !== false;
     for (const key of ['catalogIds', 'catalogSyncedIds', 'catalogStoredSkippedIds', 'catalogPromptlessSkippedIds', 'catalogOversizeSkippedIds', 'catalogRejectedIds', 'catalogProcessedIds', 'catalogDiscoveredIds', 'outstandingIds']) {
       run[key] = [...new Set((Array.isArray(prior[key]) ? prior[key] : []).map(String)
         .filter(id => /^[1-9]\d{0,19}$/.test(id) && Number.isSafeInteger(Number(id))))];
@@ -417,10 +440,12 @@ async function stopSession(tabId, reason = 'user', error = '') {
   const run = sessions.get(tabId), driver = drivers.get(tabId);
   if (run) {
     if (driver) { driver.enabled = false; driver.phase = 'paused'; }
+    const keepPause = ['source-tab-closed', 'source-tab-changed'].includes(reason) && run.status.stopped &&
+      run.status.stopReason && !recoverableSourcePause(run) && run.status.stopReason !== 'feed-complete';
     run.status.running = run.status.scanning = false; run.status.stopped = true;
     if (['source-tab-closed','source-tab-changed'].includes(reason)) run.orphaned = true;
     retainPreparedOrphanWork(run);
-    run.status.stopReason = reason; if (error) run.status.lastError = error;
+    if (!keepPause) { run.status.stopReason = reason; if (error) run.status.lastError = error; }
     run.status.phase = reason === 'feed-complete' ? 'selected feed complete' : 'paused';
     run.status.lastActivityAt = Date.now();
     await persistState(run);
@@ -477,6 +502,7 @@ async function startSession(message, sender, resume = false) {
   }
   const run = resume ? { ...previous, feed, sessionTabId: tabId } : freshState({ pageUrl, sessionTabId: tabId, feed, statsOnly: message.settings?.statsOnly === true });
   feed.statsOnly = run.settings.statsOnly === true;
+  run.allowDetachedUploads = true;
   run.orphaned = false;
   // Clone mutable status so a response from the old paused run cannot change this run.
   run.status = { ...run.status, running: true, scanning: true, stopped: false, stopReason: '', lastError: '' };
@@ -682,7 +708,7 @@ function queuedUpload(task) {
   });
   uploadQueue = result; return result;
 }
-async function syncCloudCatalogItems(records, { required = true, onAccepted, tabId, isCurrent = () => true } = {}) {
+async function syncCloudCatalogItems(records, { required = true, onAccepted, tabId, isCurrent = () => true, useSharedTransferLane = () => false } = {}) {
   if (!Array.isArray(records) || !records.length) return { enabled: true, accepted: 0, alreadyStored: 0, missing: 0, storageItems: [] };
   const uniqueRecords = new Map();
   for (const record of records) {
@@ -705,7 +731,7 @@ async function syncCloudCatalogItems(records, { required = true, onAccepted, tab
       entry.record = { ...entry.record, ...record, creatorName: record.creatorName || entry.record.creatorName || '',
         ...(capturedPageUrl ? { capturedPageUrl, pageUrl: capturedPageUrl } : {}) };
     }
-    entry.subscribers.add({ tabId, isCurrent, onAccepted, resolve, reject });
+    entry.subscribers.add({ tabId, isCurrent, useSharedTransferLane, onAccepted, resolve, reject });
     if (fresh) checkPreparedUpload(entry);
     else if (!entry.checking) scheduleUploadFlush();
     notifyStatusChanged();
@@ -801,11 +827,13 @@ async function flushPreparedUploads() {
         let owner, collectionToken;
         while (await liveSubscribers(entry)) {
           owner = [...entry.subscribers][0];
-          collectionToken = await downloadSettings.token(owner.tabId);
+          // A prepared record no longer needs a live Civitai tab. Detached
+          // recovery uses the server's existing shared lane and global cap.
+          collectionToken = owner.useSharedTransferLane() ? undefined : await downloadSettings.token(owner.tabId);
           if (await owner.isCurrent()) break;
           owner = null;
         }
-        if (owner) items.push({ ...entry.record, collectionToken });
+        if (owner) items.push({ ...entry.record, ...(collectionToken ? { collectionToken } : {}) });
       }
       active = active.filter(entry => items.some(item => item.id === entry.record.id));
       if (!active.length) return;
@@ -912,7 +940,7 @@ function queryCivitaiTabs() {
   }));
 }
 async function needsOffscreenTicker() {
-  if (activeRuns().length) return true;
+  if (activeRuns().length || [...sessions.values()].some(canRecoverPrepared)) return true;
   if (!(await readCloudCatalogConfig()).autoBrowse) return false;
   for (const tab of await queryCivitaiTabs()) {
     if (Number.isInteger(tab.id) && ISSBrowseCollector.page(tab.url)) {
@@ -1063,7 +1091,7 @@ async function pulseAutoTabs() {
 function collectionClockPulse() {
   // Dispatch and acknowledge immediately. A slow metadata page never holds the
   // offscreen heartbeat, passive collection, or another tab's scroll clock.
-  for (const run of activeRuns()) pumpManualPrepared(run);
+  for (const run of sessions.values()) pumpManualPrepared(run);
   driverPulse().catch(error => addDebug('feeds-error', error.message));
   startClockTask('browse', () => autoBrowseCollector.pulse());
   startClockTask('scroll', pulseAutoTabs);

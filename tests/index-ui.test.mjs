@@ -234,6 +234,20 @@ test('feed activity stays visible when automatic browsing is disabled', async ()
   assert.equal(h.get('feedSummary').hidden, true);
 });
 
+test('saved upload recovery is visible without claiming its source feed is scanning', async () => {
+  const pipeline = { outstandingTotal: 40, outstandingLimit: 600, paused: 0, recoveringUploads: 40,
+    globalStages: { readyUpload: 40, uploading: 0 } };
+  const h = libraryHarness({ scans: { activeTabs: 0, pipeline, status: {}, runs: [
+    { tabId: 7, pageUrl: 'https://civitai.red/models/99', recoveringUploads: 40,
+      canResume: true, status: { stopped: true, pending: 40, catalogSynced: 20 } }
+  ] } }); await flush();
+  assert.match(h.get('feedRuns').textContent, /Sending saved records · source scan paused.*40 queued/);
+  assert.match(h.get('sharedQueueStatus').textContent, /40 saved records are finishing automatically/);
+  assert.match(h.get('sharedQueueStatus').textContent, /0 paused/);
+  const p = panelHarness({ state: { status: {}, pipeline } }); await flush();
+  assert.match(p.get('sharedQueueStatus').textContent, /40 saved records are finishing automatically/);
+});
+
 test('panel resume follows authoritative resumability and browsing pause is scoped to this tab', async () => {
   const h = panelHarness({ state: { canResume: false, status: { stopped: true }, feed: null }, browse: { manualPaused: false } }); await flush();
   assert.equal(h.get('resume').hidden, true); assert.doesNotMatch(h.get('browse').textContent, /feed scan active/);

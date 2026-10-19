@@ -27,7 +27,7 @@ header('X-Frame-Options: DENY');
       <label class="sr-only" for="qMode">Combine search words</label><select id="qMode" name="qMode" class="query-mode" title="Choose whether every word or any word must match"><option value="all">All words (AND)</option><option value="any">Any word (OR)</option></select>
       <button class="search-submit" type="submit" aria-label="Search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path></svg></button>
     </form>
-    <nav class="extension-nav" aria-label="Extension and guide"><a class="extension-link" href="/downloads/index-civitai-2.8.25.zip" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"></path></svg><span>Index Civitai</span></a><a class="guide-link" href="/guide.php">GUIDE</a></nav>
+    <nav class="extension-nav" aria-label="Extension and guide"><a class="extension-link" href="/downloads/index-civitai-2.8.26.zip" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"></path></svg><span>Index Civitai</span></a><a class="guide-link" href="/guide.php">GUIDE</a></nav>
   </header>
   <div class="browsebar">
     <?php $libraryActive='discovery'; require __DIR__.'/library-nav.php'; ?>

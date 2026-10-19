@@ -4,13 +4,19 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.25](https://search-civitai.xyz/downloads/index-civitai-2.8.25.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.26](https://search-civitai.xyz/downloads/index-civitai-2.8.26.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Browsing requires a short SVG CAPTCHA after the preloader; a successful answer unlocks that browser session for one hour across its tabs. No account or contributor key is needed. Extension contributions continue independently of the website CAPTCHA.
 
 ## Metadata upload recovery
 
 Version 2.8.21 cleans and bounds optional resource names before submission, including previously queued records. The server applies the same normalization before validation. Invalid records are returned individually, set aside with their original local prompt and rejection evidence, and shown in the invalid-metadata counter; they do not count as accepted or stop other records. Refresh the extension and gallery tabs after updating; resume scans that were already stopped by the older version.
+
+## Saved uploads after a tab closes
+
+Version 2.8.26 finishes sending prepared prompt records after their original source tab closes or changes pages. It checks for existing server copies first and uses the existing shared server download lane, under the global transfer limit. It does not reopen or scroll those source pages. Unread images stay with the saved feed cursor for a later resume.
+
+The feed list now includes retained records in its queued count, and both activity views identify saved-upload recovery. Stop tab, Stop all, authentication/permission rejections, and server rate-limit cooldowns retain their existing behavior. Your queues, counters, and feed positions are preserved.
 
 ## Independent reaction backlog
 
@@ -50,7 +56,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.25.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.26.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.

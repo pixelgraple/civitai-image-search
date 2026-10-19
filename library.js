@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.25', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.26', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
   $('panelOpenError').hidden = typeof location === 'undefined' || new URL(location.href).searchParams.get('panelError') !== '1';
   let settingsOpen = false, saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
@@ -99,7 +99,7 @@
       $('pendingCount').textContent = pipeline ? `${count(pipeline.outstandingTotal)} / ${count(pipeline.outstandingLimit || 600)}` : count(passivePending + manualPending);
       const shared = pipeline?.globalStages;
       $('sharedQueueStatus').hidden = !shared;
-      $('sharedQueueStatus').textContent = shared ? `Shared queue: ${count(amount(shared.waitingDuplicateCheck) + amount(shared.checkingDuplicates) + amount(shared.waitingMetadata) + amount(shared.readingPrompts))} preparing (checks/prompts) · ${count(shared.readyUpload)} ready to send · ${count(shared.uploading)} sending. ${count(pipeline.paused)} paused (included in these counts).` : '';
+      $('sharedQueueStatus').textContent = shared ? `Shared queue: ${count(amount(shared.waitingDuplicateCheck) + amount(shared.checkingDuplicates) + amount(shared.waitingMetadata) + amount(shared.readingPrompts))} preparing (checks/prompts) · ${count(shared.readyUpload)} ready to send · ${count(shared.uploading)} sending. ${count(pipeline.paused)} paused (included in these counts).${amount(pipeline.recoveringUploads) ? ` ${count(pipeline.recoveringUploads)} saved records are finishing automatically after their source tabs closed or changed.` : ''}` : '';
       $('queueBreakdown').textContent = pipeline ? `${count(pipeline.waitingDuplicateCheck)} waiting for duplicate check · ${count(pipeline.checkingDuplicates)} checking duplicates · ${count(pipeline.waitingMetadata)} waiting to read prompts · ${count(pipeline.readingPrompts)} reading prompts · ${count(pipeline.readyUpload)} records ready to send · ${count(pipeline.uploading)} records being sent. ${amount(pipeline.outstandingTotal) >= 600 ? `Selected gallery scrolling is paused until space is free.${amount(pipeline.paused) > 0 ? ` ${count(pipeline.paused)} images are queued on paused tabs. Resume a paused tab to drain its queue.` : ''}` : 'The 600-image limit is shared across every tab.'}` : `${count(passivePending)} automatic · ${count(manualPending)} feed images waiting or in progress`;
       const activeTabs = amount(scans?.activeTabs);
       $('activeTabCount').textContent = count(activeTabs);
@@ -125,7 +125,7 @@
       $('feedRuns').textContent = runs.map(run => {
         let page = 'Civitai';
         try { const url = new URL(run.pageUrl); page = url.hostname + url.pathname + url.search; } catch {}
-        const state = run.status?.running ? 'Scanning' : run.feed?.done ? 'Finished' : run.canResume ? 'Paused' : 'Stopped';
+        const state = run.status?.running ? 'Scanning' : run.recoveringUploads ? 'Sending saved records · source scan paused' : run.feed?.done ? 'Finished' : run.canResume ? 'Paused' : 'Stopped';
         return `Tab ${String(run.tabId)} · ${page}\n${state} · ${count(run.status?.catalogSynced)} records accepted · ${count(run.status?.pending)} queued · ${count(run.status?.processed)} processed${run.status?.phase ? ' · ' + String(run.status.phase) : ''}${run.status?.lastError ? ' · ' + String(run.status.lastError) : ''}`;
       }).join('\n\n');
   }
