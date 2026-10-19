@@ -39,7 +39,11 @@ test('large saved counters restore alongside queued prompts without resetting to
  const h=await harness({...config,[key]:{version:3,runs:[run]}});
  assert.equal(h.run('sessions.get(7).catalogSyncedIds.length'),70000);
  assert.equal(h.run('sessions.get(7).preparedRecords["101"].prompt'),'landscape fixture');
- assert.equal(h.storage[key].runs[0].catalogSyncedIds.length,70000);
+ assert.equal(h.storage[key].runs[0].historyLengths.catalogSyncedIds,70000);
+ assert.equal(h.storage[key].runs[0].catalogSyncedIds.length,0);
+ const again=await harness(structuredClone(h.storage));
+ assert.equal(again.run('sessions.get(7).catalogSyncedIds.length'),70000);
+ assert.equal(again.run('sessions.get(7).preparedRecords["101"].prompt'),'landscape fixture');
 });
 test('a failed clock setup preserves active scans and an alarm repairs the clock',async()=>{
  let fail=true,creates=0,exists=false;

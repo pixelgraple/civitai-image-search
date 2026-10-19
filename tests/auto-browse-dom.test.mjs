@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const source = fs.readFileSync(new URL('../civitai-browse.js', import.meta.url), 'utf8');
+const version = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8')).version;
 function harness(initialUrl = 'https://civitai.red/images') {
   let now = 100000, timerId = 0, statusCalls = 0, customResponse;
   const status = { ok: true, enabled: true, active: true, scrollAllowed: true, scrollPageUrl: initialUrl, pending: 0, pendingTotal: 0, tabPaused: false, sourcePaused: false, retryAt: 0 };
@@ -56,6 +57,22 @@ test('selected inactive tabs process background pulses and scroll without a loca
   const h = harness(); h.document.visibilityState = 'hidden'; h.addCard(55); await h.start(); await h.pulse();
   assert.equal(h.messages.length, 1); assert.equal(h.scrolls.length, 1); assert.equal(h.statusCalls(), 1);
   assert.doesNotMatch(source, /\.focus\(|window\.open\(|visibilityState\s*[!=]==?\s*['"]visible/);
+});
+
+test('an unanswered card submission times out and a later pulse resumes discovery', async () => {
+  const h = harness(); h.addCard(55); await h.start();
+  let late; h.respond(() => new Promise(resolve => { late = resolve; }));
+  await h.pulse(); assert.equal(h.messages.length, 1);
+  await h.pulse(); assert.equal(h.messages.length, 1, 'one in-flight observation');
+  // Trigger only the outstanding request deadline; a busy scan has no poll timer.
+  assert.equal(h.timers.size, 1);
+  const deadline = [...h.timers.values()][0]; h.timers.clear(); deadline();
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  h.respond(null); h.advance(5001); await h.pulse();
+  assert.equal(h.messages.length, 2); assert.equal(h.scrolls.length, 1);
+  late({ ok: true, accepted: ['55'], active: true });
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  assert.equal(h.scrolls.length, 1, 'late replies cannot scroll or finish a newer scan');
 });
 test('viewport discovery accepts up to sixty and drains remaining cards before scrolling', async () => {
   const h = harness(); for (let id = 1; id <= 64; id++) h.addCard(id); await h.start(); await h.pulse();
@@ -127,7 +144,7 @@ test('same-version injection is idempotent and a previous observer is disposed o
   h.context.window.__ISS_BROWSE_OBSERVER.dispose(); await h.pulse(); assert.equal(h.messages.length, 1); assert.equal(h.listeners.size, 0); assert.equal(h.timers.size, 0);
 });
 test('legacy boolean guard no longer prevents updated observer installation', async () => {
-  const h = harness(); h.context.window.__ISS_BROWSE_OBSERVER = true; await h.start(); assert.equal(h.context.window.__ISS_BROWSE_OBSERVER.version, '2.8.20');
+  const h = harness(); h.context.window.__ISS_BROWSE_OBSERVER = true; await h.start(); assert.equal(h.context.window.__ISS_BROWSE_OBSERVER.version, version);
   const rejected = harness('https://civitai.red.evil.example/'); await rejected.start(); assert.equal(rejected.statusCalls(), 0);
 });
 test('navigation during card submission never scrolls the new page using stale work', async () => {

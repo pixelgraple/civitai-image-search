@@ -9,6 +9,14 @@ Release notes for **Index Civitai** and its shared Civitai Image Search server.
 - Add an optional 60-second guard for root SSH diagnostic file searches, excluding application services and streaming pipe filters.
 - Cover timeout, navigation cancellation, response-body stalls, verification, and process selection with focused regression checks.
 
+## 2.8.27 - Reduce growing history overhead and recover stalled gallery messages
+
+- Save large per-feed ID histories incrementally in bounded storage chunks. Ordinary queue checkpoints no longer clone and rewrite all previous IDs across every feed.
+- Append IDs using cached membership indexes instead of rebuilding full lists and repeatedly scanning them for duplicates.
+- Migrate old history without resetting counters, pending prompts or feed cursors. Keep the original inline checkpoint as a recovery copy; commit new chunk prefixes before referring to them from the queue checkpoint.
+- Bound gallery message replies to ten seconds and release the busy flag for a later retry after five seconds. Ignore late replies.
+- Add long-history, repeated-checkpoint, failed-migration, partial-write, worker-restart and unanswered-message regressions.
+
 ## 2.8.26 - Finish saved uploads after a source tab closes
 
 - Send already-prepared records after a source tab closes, navigates away, or changes identity during restart. Source scanning stays paused with its cursor retained.

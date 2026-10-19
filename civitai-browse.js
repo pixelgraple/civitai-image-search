@@ -1,7 +1,7 @@
 // Observe visible cards passively; scroll only the exact gallery with an active scan.
 (() => {
   'use strict';
-  const VERSION = '2.8.26';
+  const VERSION = '2.8.27';
   if (location.protocol !== 'https:' || !['civitai.com', 'civitai.red'].includes(location.hostname)) return;
   if (window.__ISS_BROWSE_OBSERVER?.version === VERSION) return;
   window.__ISS_BROWSE_OBSERVER?.dispose?.();
@@ -15,7 +15,12 @@
     return Number.isFinite(value) ? Math.min(5, Math.max(1, Math.round(value * 2) / 2)) : 1;
   }
   const discoveryBatch = () => Math.min(100, Math.round(DISCOVERY_BATCH * speed()));
-  const send = message => chrome.runtime.sendMessage(message);
+  const send = message => new Promise((resolve, reject) => {
+    // A lost extension reply must not leave scan() busy for the life of the tab.
+    const timer = setTimeout(() => reject(new Error('Collection reply timed out.')), 10000);
+    Promise.resolve().then(() => chrome.runtime.sendMessage(message)).then(resolve, reject)
+      .finally(() => clearTimeout(timer));
+  });
   const imageId = href => { try { const url = new URL(href, location.href); return url.origin === location.origin ? url.pathname.match(/^\/images\/(\d+)\/?$/)?.[1] || '' : ''; } catch { return ''; } };
   function routeAllowed() {
     const path = location.pathname;
@@ -281,7 +286,7 @@
         if (!status.manualPaused && collectCards().length) return;
       }
       retryAt = 0; scrollGallery();
-    } catch { retryAt = Date.now() + 30000; }
+    } catch { retryAt = Date.now() + 5000; }
     finally { busy = false; if (enabled()) schedule(2500 / speed()); }
   }
   function schedule(delay = 1500 / speed()) { if (disposed || !enabled() || timer != null) return; timer = setTimeout(() => scan(), delay); }

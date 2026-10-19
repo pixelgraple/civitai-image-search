@@ -4,13 +4,21 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.26](https://search-civitai.xyz/downloads/index-civitai-2.8.26.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.27](https://search-civitai.xyz/downloads/index-civitai-2.8.27.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Browsing requires a short SVG CAPTCHA after the preloader; a successful answer unlocks that browser session for one hour across its tabs. No account or contributor key is needed. Extension contributions continue independently of the website CAPTCHA.
 
 ## Metadata upload recovery
 
 Version 2.8.21 cleans and bounds optional resource names before submission, including previously queued records. The server applies the same normalization before validation. Invalid records are returned individually, set aside with their original local prompt and rejection evidence, and shown in the invalid-metadata counter; they do not count as accepted or stop other records. Refresh the extension and gallery tabs after updating; resume scans that were already stopped by the older version.
+
+## Long-running collection
+
+Version 2.8.27 stores growing scan history in append-only chunks. Regular queue checkpoints write changed history tails and current queue state, without copying and rewriting every old image ID from every tab. Cached membership checks replace repeated full-history searches and rebuilt lists. Existing counts, duplicate history, queued prompts and feed cursors migrate automatically, retaining the original inline checkpoint as a recovery copy.
+
+Unanswered gallery messages time out after ten seconds and can retry after five seconds instead of leaving the page collector permanently busy. Existing source cooldowns and explicit Stop controls still apply.
+
+In a local synthetic benchmark with 100,000 IDs in each history field, one checkpoint decreased from about 8.8 MB to 19 KB. This measures extension bookkeeping, not guaranteed Civitai throughput. Regression coverage includes 500,000-ID history, 1,000 successive checkpoints, interrupted writes and worker restarts; overnight browser stability still requires observation.
 
 ## Saved uploads after a tab closes
 
@@ -56,7 +64,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.26.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.27.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.
