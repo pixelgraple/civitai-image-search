@@ -5,7 +5,7 @@ importScripts('retry-policy.js', 'catalog-metadata.js', 'reaction-backlog.js', '
 const STATE_KEY = 'aiImageDatasetScraperStateV6'; // Retain existing cursors and counts.
 const CONFIG_KEY = 'civitaiPromptCloud';
 const API_URL = 'https://search-civitai.xyz/api.php';
-const BACKGROUND_VERSION = '2.8.24', STATUS_PROTOCOL = 1;
+const BACKGROUND_VERSION = '2.8.25', STATUS_PROTOCOL = 1;
 const versionStatus = value => ({ ...value, backgroundVersion: BACKGROUND_VERSION, statusProtocol: STATUS_PROTOCOL });
 const OFFSCREEN_PATH = 'offscreen.html';
 const RUN_VERSION = 3;
@@ -370,8 +370,9 @@ async function restoreAll() {
     const sourceTab = await getTab(tabId);
     run.orphaned = ISSBrowseCollector.page(sourceTab?.url)?.href !== pageUrl;
     retainPreparedOrphanWork(run);
-    const recoverConnection = ['upload-error', 'feed-error'].includes(run.status.stopReason) &&
-      ISSRetryPolicy.isTransient({ message: run.status.lastError });
+    const recoverConnection = run.status.stopReason === 'clock-error' ||
+      (['upload-error', 'feed-error'].includes(run.status.stopReason) &&
+      ISSRetryPolicy.isTransient({ message: run.status.lastError }));
     if (prior.status?.running || prior.status?.scanning || recoverConnection) {
       try {
         if (prior.settings?.serverCopies !== true) throw new Error('Previous local collection is paused. Resume to send this feed to the server.');
@@ -391,7 +392,10 @@ async function restoreAll() {
   // Old browser-file queues are deliberately discarded during migration.
   await persistState();
 }
-const ready = restoreAll();
+const workerStartup = { phase: 'restoring', startedAt: Date.now(), error: '' };
+const ready = restoreAll().then(() => { workerStartup.phase = 'ready'; }, error => {
+  workerStartup.phase = 'error'; workerStartup.error = String(error.message || error).slice(0, 500); throw error;
+});
 
 async function ensureOffscreenTicker() {
   const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'], documentUrls: [chrome.runtime.getURL(OFFSCREEN_PATH)] });
@@ -1067,13 +1071,14 @@ function collectionClockPulse() {
 }
 async function refreshAutoBrowseTabs() {
   const tabs = await queryCivitaiTabs();
+  // A frozen gallery must not prevent the browser-wide clock from starting.
+  await reconcileOffscreenTicker();
   await Promise.allSettled(tabs.filter(tab => Number.isInteger(tab.id) && ISSBrowseCollector.page(tab.url)).map(async tab => {
     try {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-browse.js'] });
+      await withClockTimeout(chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['civitai-browse.js'] }), 10000);
       await withClockTimeout(chrome.tabs.sendMessage(tab.id, { type: 'civitai-auto-refresh' }));
     } catch {} // Loading/closed tabs attach the content script on next load.
   }));
-  await reconcileOffscreenTicker();
   nextAutoTabPulseAt = 0;
   startClockTask('scroll', pulseAutoTabs); startClockTask('browse', () => autoBrowseCollector.pulse());
 }
@@ -1204,6 +1209,14 @@ async function handleMessage(message, sender) {
   }
 }
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Launcher health and clock acknowledgements cannot wait behind restoration.
+  if (message?.type === 'getWorkerHealth' && (!sender?.id || sender.id === chrome.runtime.id) && isExtensionPage(sender)) {
+    sendResponse(versionStatus({ ok: true, ...workerStartup })); return false;
+  }
+  if (message?.type === 'driverPulse' && sender?.id === chrome.runtime.id && sender.url === chrome.runtime.getURL(OFFSCREEN_PATH)) {
+    if (workerStartup.phase === 'ready') collectionClockPulse();
+    sendResponse({ ok: workerStartup.phase === 'ready', phase: workerStartup.phase }); return false;
+  }
   ready.then(() => handleMessage(message, sender)).then(sendResponse)
     .catch(error => sendResponse(versionStatus({ ok: false, error: error.message })));
   return true;
@@ -1212,7 +1225,7 @@ chrome.runtime.onConnect.addListener(connectStatusPort);
 chrome.action.onClicked.addListener(async tab => {
   if (!ISSBrowseCollector.page(tab?.url)) { await openLibrary(); return; }
   try {
-    const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, injectImmediately: true, files: ['civitai-feed-capture.js', 'download-control.js', 'source-control.js', 'panel.js'] });
+    const results = await withClockTimeout(chrome.scripting.executeScript({ target: { tabId: tab.id }, injectImmediately: true, files: ['civitai-feed-capture.js', 'runtime-request.js', 'download-control.js', 'source-control.js', 'panel.js'] }), 10000);
     const result = results?.[0]?.result;
     if (!result?.ok || result.panelVersion !== BACKGROUND_VERSION) throw new Error(result?.error || 'The collection panel did not finish opening.');
     await Promise.allSettled([chrome.action.setBadgeText({ tabId: tab.id, text: '' }), chrome.action.setTitle({ tabId: tab.id, title: 'Index Civitai' })]);
@@ -1226,7 +1239,12 @@ chrome.action.onClicked.addListener(async tab => {
   }
 });
 chrome.alarms.onAlarm.addListener(alarm => {
-  ready.then(() => ['iss-active-run', 'civitai-auto-browse'].includes(alarm.name) ? collectionClockPulse() : undefined)
+  ready.then(() => {
+    if (!['iss-active-run', 'civitai-auto-browse'].includes(alarm.name)) return;
+    collectionClockPulse();
+    // Repair a missing offscreen document after browser/renderer recovery.
+    startClockTask('ticker-recovery', reconcileOffscreenTicker);
+  })
     .catch(error => addDebug('clock-error', error.message));
 });
 chrome.tabs.onRemoved.addListener(tabId => {
@@ -1268,6 +1286,6 @@ ready.then(async () => {
   await autoBrowseCollector.initialized;
   chrome.alarms.create('civitai-auto-browse', { periodInMinutes: 0.5 });
   if (activeRuns().length) chrome.alarms.create('iss-active-run', { periodInMinutes: 0.5 });
-  try { await refreshAutoBrowseTabs(); }
-  catch (error) { await stopAll('clock-error', error.message); throw error; }
+  // Transient clock setup failures must not convert saved scans into user stops.
+  await refreshAutoBrowseTabs();
 }).catch(error => addDebug('startup-error', error.message));

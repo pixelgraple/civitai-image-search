@@ -18,11 +18,12 @@
   }
   function workerStatus() {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ type: 'getSourceStatus' }, response => {
+      chrome.runtime.sendMessage({ type: 'getWorkerHealth' }, response => {
         const error = chrome.runtime.lastError;
         if (error) reject(new Error(error.message));
         else if (!response?.ok) reject(new Error(response?.error || 'The collector did not respond.'));
         else if (response.backgroundVersion !== version) reject(new Error('The collector is running an older version. Restart the extension.'));
+        else if (response.phase && response.phase !== 'ready') reject(new Error(response.error || 'The collector is restoring its saved queue. Try opening again shortly.'));
         else resolve(response);
       });
     });
@@ -37,7 +38,7 @@
       const [tab] = await deadline(() => chrome.tabs.query({ active: true, currentWindow: true }), 3000, 'Brave did not return the active tab.');
       if (!eligible(tab)) { $('launcherStatus').textContent = 'Open a civitai.com or civitai.red gallery, then click Index Civitai.'; return; }
       const results = await deadline(() => chrome.scripting.executeScript({ target: { tabId: tab.id }, injectImmediately: true,
-        files: ['civitai-feed-capture.js', 'download-control.js', 'source-control.js', 'panel.js'] }), 8000,
+        files: ['civitai-feed-capture.js', 'runtime-request.js', 'download-control.js', 'source-control.js', 'panel.js'] }), 8000,
       'The page did not respond within 8 seconds. Refresh this gallery and try again.');
       const result = results?.find(item => item.frameId === 0)?.result || results?.[0]?.result;
       if (!result?.ok || result.panelVersion !== version) throw new Error(result?.error || 'The collection panel did not finish opening.');
@@ -45,7 +46,7 @@
       await deadline(workerStatus, 5000, 'The collector did not respond within 5 seconds. Restart the extension to reconnect.');
       Promise.allSettled([chrome.action.setBadgeText({ tabId: tab.id, text: '' }),
         chrome.action.setTitle({ tabId: tab.id, title: 'Index Civitai' })]);
-      window.close();
+      $('launcherStatus').textContent = 'Connected. This tab’s collection panel is open. Click outside this launcher to use it, or open Browsing & activity below.';
     } catch (error) {
       $('launcherStatus').textContent = mounted ? 'The panel opened, but the collector is unavailable.' : 'Could not open this tab’s collection panel.';
       $('launcherError').textContent = String(error?.message || error).slice(0, 500); $('launcherError').hidden = false;

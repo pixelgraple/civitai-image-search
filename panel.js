@@ -1,7 +1,7 @@
 // Civitai controls run in an isolated world. Public indexing needs no setup.
 (() => {
   'use strict';
-  const VERSION = '2.8.24', ROOT_ID = '__iss_panel_root';
+  const VERSION = '2.8.25', ROOT_ID = '__iss_panel_root';
   const previousRoot = document.getElementById(ROOT_ID);
   if (window.__ISS_PANEL_VERSION === VERSION && previousRoot?.isConnected && typeof window.__ISS_TOGGLE_PANEL === 'function') {
     try { window.__ISS_TOGGLE_PANEL(true); return { ok: true, panelVersion: VERSION }; } catch { /* Rebuild an unusable panel. */ }
@@ -43,10 +43,7 @@
   document.documentElement.appendChild(root);
   const $ = id => panel.getElementById(id);
   const count = value => Math.max(0, Number(value) || 0).toLocaleString();
-  const send = payload => new Promise(resolve => {
-    try { chrome.runtime.sendMessage(payload, response => { const error = chrome.runtime.lastError; resolve(error ? { ok: false, error: error.message } : response || { ok: false }); }); }
-    catch { resolve({ ok: false, error: 'Extension updated. Refresh this Civitai tab.' }); }
-  });
+  const send = payload => ISSRuntimeRequest(payload).catch(error => ({ ok: false, error: error.message || 'Extension updated. Refresh this Civitai tab.' }));
   function createSpeedControl(onApplied) {
     let applied = 1, requested = null, sending = null, failed = null, profile = null, pending = false, editing = false, supported = false;
     let debounce = null, protectUntil = 0, error = '', changed = false;

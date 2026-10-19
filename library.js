@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const VERSION = '2.8.24', API = 'https://search-civitai.xyz/api.php';
+  const VERSION = '2.8.25', API = 'https://search-civitai.xyz/api.php';
   const $ = id => document.getElementById(id);
   $('panelOpenError').hidden = typeof location === 'undefined' || new URL(location.href).searchParams.get('panelError') !== '1';
   let settingsOpen = false, saving = false, refreshing = false, healthBusy = false, preferenceLoaded = false, preferenceDirty = false, renderedPreference = true;
@@ -8,10 +8,7 @@
   const count = value => Math.max(0, Number(value) || 0).toLocaleString();
   const amount = value => Math.max(0, Number(value) || 0);
   const message = (text, error = false) => { $('settingsMessage').textContent = text; $('settingsMessage').classList.toggle('error', error); };
-  const send = payload => new Promise((resolve, reject) => {
-    try { chrome.runtime.sendMessage(payload, response => { const error = chrome.runtime.lastError; error ? reject(new Error(error.message)) : resolve(response || { ok: false }); }); }
-    catch { reject(new Error('Extension updated. Reload this settings page.')); }
-  });
+  const send = payload => ISSRuntimeRequest(payload);
   function createSpeedControl(onApplied) {
     let applied = 1, requested = null, sending = null, failed = null, profile = null, pending = false, editing = false, supported = false;
     let debounce = null, protectUntil = 0, error = '', changed = false;
@@ -78,13 +75,14 @@
   const downloadControl = ISSDownloadControl.create({ root: document, send, chooseTab: true });
   async function request(action) {
     const headers = { Accept: 'application/json' };
-    const response = await fetch(`${API}?action=${action}`, { headers, cache: 'no-store', credentials: 'omit', redirect: 'error' });
+    const response = await fetch(`${API}?action=${action}`, { headers, cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(15000) });
     let data;
     try { data = await response.json(); } catch { throw new Error('The server did not return a valid response. Try again shortly.'); }
     if (!response.ok || !data.ok) throw new Error(data.error || `The server returned HTTP ${response.status}.`);
     return data;
   }
   function renderSnapshot(snapshot) {
+      $('workerRecovery').hidden = true;
       const { config, browse: status, state: scans, source } = snapshot;
       const pipeline = scans.pipeline || status.pipeline || null;
       const compatible = snapshot.backgroundVersion === VERSION && snapshot.statusProtocol === 1;
@@ -178,7 +176,7 @@
       if (config?.ok === false || status?.ok === false || scans?.ok === false || source?.ok === false) throw new Error(config?.error || status?.error || scans?.error || source?.error || 'Could not read extension status.');
       if (disposed || revision !== before) return;
       applySnapshot({ config, browse: status, state: scans, source, transfers: transfers?.transfers, backgroundVersion: config.backgroundVersion || scans.backgroundVersion || status.backgroundVersion || '', statusProtocol: config.statusProtocol || scans.statusProtocol || status.statusProtocol || 0 });
-    } catch (error) { if (!disposed && revision === before) { $('browseState').textContent = 'Unavailable'; $('browseStatus').textContent = error.message; } }
+    } catch (error) { if (!disposed && revision === before) { $('browseState').textContent = 'Unavailable'; $('browseStatus').textContent = error.message; $('workerRecovery').hidden = false; } }
     finally { refreshing = false; }
   }
   async function checkHealth() {
@@ -219,6 +217,13 @@
     finally { $('pauseAll').disabled = false; }
   });
   $('autoBrowse').addEventListener('change', () => { preferenceDirty = true; });
+  $('retryCollector').addEventListener('click', () => refreshStatus());
+  $('restartCollector').addEventListener('click', () => {
+    $('restartCollector').disabled = true;
+    $('browseStatus').textContent = 'Restarting the collector. Reopen Browsing & activity afterwards. Saved queues are retained.';
+    try { chrome.runtime.reload(); }
+    catch (error) { $('restartCollector').disabled = false; $('browseStatus').textContent = error.message; }
+  });
   connectStatus(); refreshStatus(); checkHealth();
   const pollTimer = setInterval(() => { if (!portReady) refreshStatus(); else if (latest) renderSnapshot(latest); downloadControl.tick(); }, 2000);
   const healthTimer = setInterval(checkHealth, 10000);

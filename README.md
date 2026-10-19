@@ -4,7 +4,7 @@
 
 Civitai Image Search combines **Index Civitai**, a browser extension, with a shared searchable image library. Contributors choose the Civitai pages they want to scan. The extension discovers images and collects their generation metadata; the server saves eligible image copies so everyone can search and browse the indexed collection.
 
-**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.24](https://search-civitai.xyz/downloads/index-civitai-2.8.24.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
+**[Open the shared library](https://search-civitai.xyz/)** · **[Download Index Civitai 2.8.25](https://search-civitai.xyz/downloads/index-civitai-2.8.25.zip)** · **[Contributor guide](https://search-civitai.xyz/guide.php)** · **[Install the extension](https://search-civitai.xyz/extension.php)** · **[GitHub releases](https://github.com/pixelgraple/civitai-image-search/releases)**
 
 The extension supports `civitai.com` and `civitai.red`. The website can be used without installing the extension. Browsing requires a short SVG CAPTCHA after the preloader; a successful answer unlocks that browser session for one hour across its tabs. No account or contributor key is needed. Extension contributions continue independently of the website CAPTCHA.
 
@@ -14,7 +14,7 @@ Version 2.8.21 cleans and bounds optional resource names before submission, incl
 
 ## Independent reaction backlog
 
-Version 2.8.24 opens a browser-owned launcher independently of the collector worker. It opens the tab panel immediately, shows bounded page/worker connection errors, and offers Retry or Restart without clearing saved queues. Clicking the icon again keeps the panel visible.
+Version 2.8.25 keeps the toolbar launcher visible with connection status and Retry/Restart controls. Collection heartbeats recover from unanswered messages, browser alarms repair a missing collection clock, and temporary renderer interruptions retry without stopping a saved scan. The activity page times out unresponsive controls and offers its own Restart action. Saved queues and source rate-limit cooldowns are retained.
 
 Automatic recovery from 2.8.23 retries temporary network failures automatically after five seconds, preserving prompts, queues and source cursors. The panel shows the retry countdown and identifies shared-catalog connection failures. Existing runs stopped by a connection failure recover on reload when their original tab is still open; manually stopped tabs remain stopped. Required server/Civitai cooldowns and login or permission checks still apply.
 
@@ -50,7 +50,7 @@ Search covers **images already indexed by contributors**. It does not search eve
 
 ## Install or update
 
-1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.24.zip) and extract it into a permanent folder.
+1. [Download the extension ZIP](https://search-civitai.xyz/downloads/index-civitai-2.8.25.zip) and extract it into a permanent folder.
 2. Open `brave://extensions` or `chrome://extensions`, then enable **Developer mode**.
 3. Click **Load unpacked** and select the extracted folder containing `manifest.json`.
 4. For an existing unpacked installation, replace its files and click **Reload** on the Extensions page.

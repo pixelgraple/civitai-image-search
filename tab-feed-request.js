@@ -248,7 +248,12 @@ async function requestCivitaiFeedDirect(tabId, url, pageUrl) {
     result = results?.[0]?.result;
   } catch (error) {
     if (error?.sourceTimeout) throw error;
-    throw Object.assign(new Error('Could not reach the original Civitai tab. Keep it open, then start again.'), { status: 409 });
+    // Closed tabs and denied access require user action. A renderer temporarily
+    // losing its frame during reload is retryable and must not stop a saved run.
+    const unavailable = /no tab with id|invalid tab id|cannot access|missing host permission|extensions gallery cannot be scripted/i.test(String(error?.message || error));
+    throw Object.assign(new Error(unavailable
+      ? 'Could not reach the original Civitai tab. Keep it open, then start again.'
+      : 'The Civitai tab connection was interrupted. Retrying automatically; keep the gallery open.'), { status: unavailable ? 409 : 0, name: unavailable ? 'Error' : 'NetworkError' });
   } finally { if (timeout !== undefined) clearTimeout(timeout); }
   if (!result?.ok || !result.data || result.data.error) {
     let detail = result?.message || '';

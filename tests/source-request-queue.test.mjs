@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const source = fs.readFileSync(new URL('../tab-feed-request.js', import.meta.url), 'utf8');
+const retryPolicy = vm.runInNewContext(fs.readFileSync(new URL('../retry-policy.js', import.meta.url), 'utf8') + '\nISSRetryPolicy');
 const page = 'https://civitai.red/models/99';
 const url = 'https://civitai.red/api/trpc/image.getInfinite?input=%7B%22json%22%3A%7B%22modelId%22%3A99%7D%7D';
 const success = () => ({ ok: true, status: 200, data: { result: { data: { json: { items: [] } } } } });
@@ -15,7 +16,7 @@ function harness(saved = {}, sourceConcurrency = 1) {
   const timers = new Map(), calls = [], storage = structuredClone(saved);
   class Clock extends Date { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } }
   const context = vm.createContext({ URL, Date: Clock, AbortSignal, Promise,
-    ISSCollectionSpeed: { get: () => ({ sourceIntervalMs: 2000, metadataConcurrency: 12, sourceConcurrency }) },
+    ISSCollectionSpeed: { get: () => ({ sourceIntervalMs: 2000, metadataConcurrency: 12, sourceConcurrency }), subscribe() { return () => {}; } },
     ISSFeed: { decode: value => value?.json ?? value },
     setTimeout: (callback, delay) => { const id = ++timerId; timers.set(id, { at: now + delay, callback }); return id; },
     clearTimeout: id => timers.delete(id),
@@ -187,6 +188,16 @@ test('invalid tab ids and checking source status never create source requests', 
   assert.equal(status.maxActive, 1); assert.equal(status.sourceStartLimit, 1); assert.equal(status.maxActiveLimit, 4);
   assert.equal((await observe(h.request(null))).error.status, 409);
   assert.equal(h.calls.length, 0);
+});
+test('temporary frame loss is retryable while closed tabs and denied access require attention', async () => {
+  for (const [message,status] of [['Frame with ID 0 was removed.',0],['The message port closed before a response was received.',0],['No tab with id: 7.',409],['Cannot access contents of the page. Missing host permission.',409]]) {
+    const h=harness();h.reply=()=>{throw new Error(message);};
+    const result=await observe(h.request(7));assert.equal(result.ok,false);assert.equal(result.error.status,status);
+    assert.equal(retryPolicy.isTransient(result.error),status===0);
+    if(status===0)assert.equal(retryPolicy.delay(result.error),5000);
+    assert.equal((await h.state()).authStatus,0);assert.equal((await h.state()).retryAfterMs,0);
+    h.reply=success;await h.advance(2000);assert.equal((await observe(h.request(7))).ok,true);
+  }
 });
 
 test('503 with Retry-After also drains source work and shares the full cooldown', async () => {

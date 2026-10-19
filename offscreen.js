@@ -7,11 +7,16 @@ async function pulse() {
   if (pulseInFlight) return;
   pulseInFlight = true;
 
+  let deadline;
   try {
-    await chrome.runtime.sendMessage({ type: 'driverPulse', source: 'offscreen' });
+    await Promise.race([
+      chrome.runtime.sendMessage({ type: 'driverPulse', source: 'offscreen' }),
+      new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('Collector heartbeat timed out.')), 5000); })
+    ]);
   } catch {
     // The service worker may be restarting. The next pulse reconnects.
   } finally {
+    clearTimeout(deadline);
     pulseInFlight = false;
   }
 }

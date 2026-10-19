@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 const version = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8')).version;
 const sourceControl = fs.readFileSync(new URL('../source-control.js', import.meta.url), 'utf8');
+const runtimeRequest = fs.readFileSync(new URL('../runtime-request.js', import.meta.url), 'utf8');
 const downloadStub = { create: () => ({ accept() {}, tick() {}, dispose() {} }) };
 const library = fs.readFileSync(new URL('../library.js', import.meta.url), 'utf8');
 const panel = fs.readFileSync(new URL('../panel.js', import.meta.url), 'utf8');
@@ -53,7 +54,7 @@ function libraryHarness({ pageUrl = 'chrome-extension://test-extension/library.h
     else if (payload.type === 'getState') callback(scans);
     else callback({ ok: true, enabled: cloud.autoBrowse !== false, synced: 3, pending: 2, alreadyStored: 1, skippedPromptless: 4, ...browse });
   } } };
-  vm.runInNewContext(sourceControl + '\n' + library, { ISSDownloadControl: downloadStub, document: { getElementById: get }, location: { href: pageUrl }, chrome, URL, Date: { now: transport.now }, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout, clearInterval() {}, setInterval(fn, delay) { intervals.push(fn); intervalDelays.push(delay); }, fetch: async (url, options) => {
+  vm.runInNewContext(runtimeRequest + '\n' + sourceControl + '\n' + library, { ISSDownloadControl: downloadStub, document: { getElementById: get }, location: { href: pageUrl }, chrome, URL, AbortSignal, Date: { now: transport.now }, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout, clearInterval() {}, setInterval(fn, delay) { intervals.push(fn); intervalDelays.push(delay); }, fetch: async (url, options) => {
     requests.push({ url, options }); if (failFetch) throw new Error('offline');
     return { ok: true, status: 200, json: async () => ({ ok: true, counts: { total: 5, ready: 4, pending: 1 } }) };
   } });
@@ -86,7 +87,7 @@ function panelHarness({ initialize = true, configured = true, config = {}, state
   } } };
   const window = { __ISS_FEED_CAPTURE: { capture, cancel() {} } };
   const context = vm.createContext({ ISSDownloadControl: downloadStub, document, window, AbortController, chrome, Date: { now: transport.now }, location: { href: 'https://civitai.red/models/42', hostname: 'civitai.red' }, performance: { getEntriesByType() { return []; } }, setInterval() {}, clearInterval() {}, setTimeout: transport.setTimeout, clearTimeout: transport.clearTimeout });
-  vm.runInContext(sourceControl, context);
+  vm.runInContext(runtimeRequest + '\n' + sourceControl, context);
   const inject = () => vm.runInContext(panel, context);
   if (initialize) inject();
   return { get, messages, get root() { return root; }, events, transport, window, cloud, context, inject };

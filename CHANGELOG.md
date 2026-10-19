@@ -9,6 +9,15 @@ Release notes for **Index Civitai** and its shared Civitai Image Search server.
 - Add an optional 60-second guard for root SSH diagnostic file searches, excluding application services and streaming pipe filters.
 - Cover timeout, navigation cancellation, response-body stalls, verification, and process selection with focused regression checks.
 
+## 2.8.25 - Collection clock and control recovery
+
+- Keep the toolbar launcher visible after opening the page panel, with an independent worker-health reply during queue restoration.
+- Retry a lost offscreen heartbeat after five seconds. Browser alarms recreate a missing collection clock; a frozen tab injection cannot prevent that clock from starting.
+- Preserve active scans when clock setup temporarily fails, and recover older clock-error pauses on the same source tab. User-stopped scans remain paused.
+- Retry temporary frame/renderer interruptions. Closed tabs, permission errors, source authentication pauses and rate-limit cooldowns still require their existing handling.
+- Bound control replies to ten seconds and activity health requests to fifteen seconds. Show Retry/Restart controls instead of an indefinite loading state.
+- Add recovery regression tests, including late replies, frozen injections and restoration of 70,000 saved accepted IDs with queued prompt data.
+
 ## 2.8.24 - Reliable toolbar launcher
 
 - Open toolbar controls through a browser-owned popup independently of the collector service worker.

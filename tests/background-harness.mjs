@@ -77,7 +77,7 @@ export async function harness(saved = {}, options = {}) {
       : file === 'download-settings.js' ? installDownloadSettings(context)
       : vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context));
   vm.runInContext(fs.readFileSync(path.join(root, 'background.js'), 'utf8'), context);
-  await vm.runInContext('ready', context);
+  if (options.awaitReady !== false) await vm.runInContext('ready', context);
   const run = code => vm.runInContext(code, context);
   run('uploadIntervalMs = 0');
   const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); await run('persistChain'); };

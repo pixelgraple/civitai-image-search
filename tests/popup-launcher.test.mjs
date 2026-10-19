@@ -25,9 +25,9 @@ test('manifest uses a browser-owned popup independent of the service-worker clic
  assert.ok(!html.includes('onclick='));
 });
 for(const host of ['civitai.com','civitai.red'])test(`launcher opens ${host} immediately without starting a scan`,async()=>{
- const h=harness({url:`https://${host}/images`});await flush();assert.equal(h.closed(),1);assert.equal(h.scripts.length,1);
+ const h=harness({url:`https://${host}/images`});await flush();assert.equal(h.closed(),0);assert.match(h.get('launcherStatus').textContent,/Connected/);assert.equal(h.scripts.length,1);
  assert.equal(h.scripts[0].target.tabId,7);assert.equal(h.scripts[0].injectImmediately,true);
- assert.equal(h.scripts[0].files.at(-1),'panel.js');assert.deepEqual(h.messages.map(x=>x.type),['getSourceStatus']);assert.equal(h.timers.size,0);
+ assert.equal(h.scripts[0].files.at(-1),'panel.js');assert.deepEqual(h.messages.map(x=>x.type),['getWorkerHealth']);assert.equal(h.timers.size,0);
 });
 for(const url of ['https://example.com/','https://civitai.com.evil.test/images','http://civitai.com/images','https://user@civitai.com/images','https://civitai.com:8443/images'])test(`launcher does not inject into ${url}`,async()=>{
  const h=harness({url});await flush();assert.equal(h.scripts.length,0);assert.equal(h.messages.length,0);assert.equal(h.closed(),0);assert.match(h.get('launcherStatus').textContent,/Open a civitai/);
@@ -35,7 +35,7 @@ for(const url of ['https://example.com/','https://civitai.com.evil.test/images',
 test('failed injection displays its error and enables retry',async()=>{
  let fail=true;const h=harness({inject:()=>fail?Promise.reject(new Error('Page access denied')):Promise.resolve([{frameId:0,result:{ok:true,panelVersion:manifest.version}}])});
  await flush();assert.equal(h.closed(),0);assert.equal(h.get('launcherError').hidden,false);assert.match(h.get('launcherError').textContent,/Page access denied/);
- assert.equal(h.get('retry').disabled,false);fail=false;h.get('retry').events.click();await flush();assert.equal(h.closed(),1);assert.equal(h.timers.size,0);
+ assert.equal(h.get('retry').disabled,false);fail=false;h.get('retry').events.click();await flush();assert.equal(h.closed(),0);assert.match(h.get('launcherStatus').textContent,/Connected/);assert.equal(h.timers.size,0);
 });
 test('a never-finishing injection ends visibly after eight seconds',async()=>{
  let finish;const h=harness({inject:()=>new Promise(resolve=>finish=resolve)});await flush();h.timeout(8000);await flush();
@@ -58,5 +58,5 @@ test('an unresponsive active-tab query has its own deadline',async()=>{
 });
 test('repeated clicks while opening do not create duplicate injections',async()=>{
  let finish;const h=harness({inject:()=>new Promise(resolve=>finish=resolve)});await flush();h.get('retry').events.click();await flush();assert.equal(h.scripts.length,1);
- finish([{frameId:0,result:{ok:true,panelVersion:manifest.version}}]);await flush();assert.equal(h.closed(),1);
+ finish([{frameId:0,result:{ok:true,panelVersion:manifest.version}}]);await flush();assert.equal(h.closed(),0);assert.match(h.get('launcherStatus').textContent,/Connected/);
 });
